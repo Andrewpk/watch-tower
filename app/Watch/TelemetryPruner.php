@@ -90,37 +90,68 @@ class TelemetryPruner
      * Used before removing the project row so that the final delete has
      * almost nothing left to cascade.
      *
-     * @return array<string, int> rows deleted per table
+     * The run can be time-boxed. It stops, unfinished, before starting a chunk
+     * once `$maxChunks` non-empty chunks have been deleted or `$deadline`
+     * (a `microtime(true)` timestamp) has passed. Every call that finds rows
+     * deletes at least one chunk, so repeated calls always make progress.
+     *
+     * @param  int|null  $maxChunks  most chunks to delete in this call, or null for no limit
+     * @param  float|null  $deadline  `microtime(true)` after which no new chunk starts, or null for no limit
+     * @return array{deleted: array<string, int>, finished: bool} rows deleted per table, and whether nothing is left
      */
-    public function purge(string $projectId): array
+    public function purge(string $projectId, ?int $maxChunks = null, ?float $deadline = null): array
     {
         $deleted = [];
+        $chunks = 0;
 
-        foreach (array_keys(self::TIME_COLUMNS) as $table) {
-            $deleted[$table] = $this->deleteInChunks($table, $projectId);
+        foreach ([...array_keys(self::TIME_COLUMNS), 'error_groups'] as $table) {
+            $deleted[$table] = 0;
+
+            do {
+                if (($maxChunks !== null && $chunks >= $maxChunks) || ($deadline !== null && microtime(true) >= $deadline)) {
+                    return ['deleted' => $deleted, 'finished' => false];
+                }
+
+                [$selected, $removed] = $this->deleteChunk($table, $projectId);
+
+                $deleted[$table] += $removed;
+                $chunks += $selected > 0 ? 1 : 0;
+            } while ($selected === $this->chunkSize);
         }
 
-        $deleted['error_groups'] = $this->deleteInChunks('error_groups', $projectId);
-
-        return $deleted;
+        return ['deleted' => $deleted, 'finished' => true];
     }
 
-    private function deleteInChunks(string $table, string $projectId, ?string $timeColumn = null, ?CarbonInterface $before = null): int
+    private function deleteInChunks(string $table, string $projectId, string $timeColumn, CarbonInterface $before): int
     {
         $deleted = 0;
 
         do {
-            $ids = DB::table($table)
-                ->where('project_id', $projectId)
-                ->when($timeColumn !== null, fn ($query) => $query->where($timeColumn, '<', $before))
-                ->limit($this->chunkSize)
-                ->pluck('id');
+            [$selected, $removed] = $this->deleteChunk($table, $projectId, $timeColumn, $before);
 
-            if ($ids->isNotEmpty()) {
-                $deleted += DB::table($table)->whereIn('id', $ids->all())->delete();
-            }
-        } while ($ids->count() === $this->chunkSize);
+            $deleted += $removed;
+        } while ($selected === $this->chunkSize);
 
         return $deleted;
+    }
+
+    /**
+     * Delete up to one chunk of a project's rows, optionally only those older than the cutoff.
+     *
+     * @return array{int, int} rows selected, rows deleted
+     */
+    private function deleteChunk(string $table, string $projectId, ?string $timeColumn = null, ?CarbonInterface $before = null): array
+    {
+        $ids = DB::table($table)
+            ->where('project_id', $projectId)
+            ->when($timeColumn !== null, fn ($query) => $query->where($timeColumn, '<', $before))
+            ->limit($this->chunkSize)
+            ->pluck('id');
+
+        if ($ids->isEmpty()) {
+            return [0, 0];
+        }
+
+        return [$ids->count(), DB::table($table)->whereIn('id', $ids->all())->delete()];
     }
 }

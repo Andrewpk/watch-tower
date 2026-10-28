@@ -5,6 +5,7 @@ use App\Models\ErrorGroup;
 use App\Models\Project;
 use App\Models\User;
 use App\Watch\TelemetryPruner;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -95,4 +96,92 @@ it('does nothing when the project is already gone', function () {
     DeleteProjectData::dispatchSync((string) Str::uuid());
 
     expect(Project::count())->toBe(1);
+});
+
+/**
+ * Rows the project still owns across every purged table, error groups included.
+ */
+function remainingProjectRows(Project $project): int
+{
+    return collect([...array_keys(TelemetryPruner::TIME_COLUMNS), 'error_groups'])
+        ->sum(fn (string $table) => DB::table($table)->where('project_id', $project->id)->count());
+}
+
+it('stops a run after its chunk budget and dispatches itself again', function () {
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+    $before = remainingProjectRows($this->project);
+
+    Bus::fake();
+
+    (new DeleteProjectData($this->project->id, maxChunks: 1))->handle(new TelemetryPruner(1));
+
+    expect(remainingProjectRows($this->project))->toBe($before - 1)
+        ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeTrue();
+
+    Bus::assertDispatched(
+        DeleteProjectData::class,
+        fn (DeleteProjectData $job) => $job->projectId === $this->project->id && $job->maxChunks === 1,
+    );
+});
+
+it('removes the project and all its telemetry after repeated time-boxed runs', function () {
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+
+    Bus::fake();
+
+    $pruner = new TelemetryPruner(1);
+    $job = new DeleteProjectData($this->project->id, maxChunks: 1);
+    $runs = 0;
+
+    while ($job !== null && $runs < 200) {
+        $job->handle($pruner);
+        $runs++;
+        $job = Bus::dispatched(DeleteProjectData::class)->get($runs - 1);
+    }
+
+    expect($runs)->toBeGreaterThan(1)
+        ->and($job)->toBeNull()
+        ->and(Bus::dispatched(DeleteProjectData::class))->toHaveCount($runs - 1)
+        ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(remainingProjectRows($this->project))->toBe(0);
+});
+
+it('purges within a deadline and reports whether it finished', function () {
+    seedTelemetry($this->project, now());
+
+    $pruner = new TelemetryPruner(1);
+
+    $late = $pruner->purge($this->project->id, deadline: microtime(true) - 1);
+
+    expect($late['finished'])->toBeFalse()
+        ->and(array_sum($late['deleted']))->toBe(0)
+        ->and(remainingProjectRows($this->project))->toBe(13 + 1);
+
+    $unlimited = $pruner->purge($this->project->id, deadline: microtime(true) + 60);
+
+    expect($unlimited['finished'])->toBeTrue()
+        ->and(array_sum($unlimited['deleted']))->toBe(14)
+        ->and(remainingProjectRows($this->project))->toBe(0);
+});
+
+it('does not let two deletions of one project overlap', function () {
+    $middleware = (new DeleteProjectData($this->project->id))->middleware();
+
+    expect($middleware)->toHaveCount(1)
+        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class)
+        ->and($middleware[0]->key)->toBe($this->project->id)
+        ->and($middleware[0]->releaseAfter)->toBe(30)
+        ->and($middleware[0]->expiresAfter)->toBe(120);
+});
+
+it('times out before the queue hands the job to another worker', function () {
+    $retryAfters = collect(['database', 'redis', 'beanstalkd'])
+        ->map(fn (string $connection) => config("queue.connections.{$connection}.retry_after"));
+
+    expect((new DeleteProjectData($this->project->id))->timeout)->toBeLessThan($retryAfters->min());
 });
