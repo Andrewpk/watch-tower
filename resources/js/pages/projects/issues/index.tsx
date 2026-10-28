@@ -1,5 +1,11 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Search } from 'lucide-react';
+import {
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
+    ExternalLink,
+    Search,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -55,7 +61,11 @@ type Props = {
 
 const STATUS_TABS = [
     { value: 'open', label: 'Open', countKey: 'open' as const },
-    { value: 'unassigned', label: 'Unassigned', countKey: 'unassigned' as const },
+    {
+        value: 'unassigned',
+        label: 'Unassigned',
+        countKey: 'unassigned' as const,
+    },
     { value: 'mine', label: 'Mine', countKey: null },
     { value: 'resolved', label: 'Resolved', countKey: null },
     { value: 'ignored', label: 'Ignored', countKey: null },
@@ -78,10 +88,15 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                 url.searchParams.set(key, value);
             }
         });
+
         if ('status' in params || 'search' in params) {
             url.searchParams.delete('page');
         }
-        router.visit(url.pathname + url.search, { preserveScroll: true, preserveState: true });
+
+        router.visit(url.pathname + url.search, {
+            preserveScroll: true,
+            preserveState: true,
+        });
     };
 
     const submitSearch = (event: React.FormEvent) => {
@@ -106,7 +121,11 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                     <PillTabs
                         active="exceptions"
                         tabs={[
-                            { value: 'exceptions', label: 'Exceptions', count: counts.all },
+                            {
+                                value: 'exceptions',
+                                label: 'Exceptions',
+                                count: counts.all,
+                            },
                         ]}
                     />
 
@@ -116,7 +135,9 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                             <Input
                                 type="search"
                                 value={search}
-                                onChange={(event) => setSearch(event.target.value)}
+                                onChange={(event) =>
+                                    setSearch(event.target.value)
+                                }
                                 placeholder="Search"
                                 className="h-8 w-56 pl-8 text-xs"
                             />
@@ -128,7 +149,9 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                             tabs={STATUS_TABS.map((tab) => ({
                                 value: tab.value,
                                 label: tab.label,
-                                count: tab.countKey ? counts[tab.countKey] : undefined,
+                                count: tab.countKey
+                                    ? counts[tab.countKey]
+                                    : undefined,
                             }))}
                         />
                     </div>
@@ -141,13 +164,47 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                             GRID_COLS,
                         )}
                     >
-                        <SortHeader label="ID" sortKey="id" current={filters.sort} direction={filters.direction} onSort={onSort} />
+                        <SortHeader
+                            label="ID"
+                            sortKey="id"
+                            current={filters.sort}
+                            direction={filters.direction}
+                            onSort={onSort}
+                        />
                         <span />
                         <span>Issue</span>
-                        <SortHeader label="Count" sortKey="count" current={filters.sort} direction={filters.direction} onSort={onSort} align="right" />
-                        <SortHeader label="Users" sortKey="users" current={filters.sort} direction={filters.direction} onSort={onSort} align="right" />
-                        <SortHeader label="First seen" sortKey="first_seen" current={filters.sort} direction={filters.direction} onSort={onSort} align="right" />
-                        <SortHeader label="Last seen" sortKey="last_seen" current={filters.sort} direction={filters.direction} onSort={onSort} align="right" />
+                        <SortHeader
+                            label="Count"
+                            sortKey="count"
+                            current={filters.sort}
+                            direction={filters.direction}
+                            onSort={onSort}
+                            align="right"
+                        />
+                        <SortHeader
+                            label="Users"
+                            sortKey="users"
+                            current={filters.sort}
+                            direction={filters.direction}
+                            onSort={onSort}
+                            align="right"
+                        />
+                        <SortHeader
+                            label="First seen"
+                            sortKey="first_seen"
+                            current={filters.sort}
+                            direction={filters.direction}
+                            onSort={onSort}
+                            align="right"
+                        />
+                        <SortHeader
+                            label="Last seen"
+                            sortKey="last_seen"
+                            current={filters.sort}
+                            direction={filters.direction}
+                            onSort={onSort}
+                            align="right"
+                        />
                         <span>Assigned</span>
                         <span>Status</span>
                         <span>Priority</span>
@@ -168,7 +225,12 @@ export default function IssuesIndex({ groups, filters, counts }: Props) {
                         </ul>
                     )}
 
-                    <Pagination links={groups.links} from={groups.from} to={groups.to} total={groups.total} />
+                    <Pagination
+                        links={groups.links}
+                        from={groups.from}
+                        to={groups.to}
+                        total={groups.total}
+                    />
                 </Card>
             </div>
         </AppLayout>
@@ -181,7 +243,12 @@ function PillTabs({
     onChange,
 }: {
     active: string;
-    tabs: { value: string; label: string; count?: number; disabled?: boolean }[];
+    tabs: {
+        value: string;
+        label: string;
+        count?: number;
+        disabled?: boolean;
+    }[];
     onChange?: (value: string) => void;
 }) {
     return (
@@ -190,7 +257,9 @@ function PillTabs({
                 const isActive = tab.value === active;
                 const className = cn(
                     'inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors',
-                    isActive ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
+                    isActive
+                        ? 'bg-muted text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
                     tab.disabled && 'cursor-not-allowed opacity-50',
                 );
 
@@ -207,7 +276,9 @@ function PillTabs({
                             <span
                                 className={cn(
                                     'rounded px-1 font-mono text-[10px] tabular-nums',
-                                    isActive ? 'bg-background text-foreground' : 'text-muted-foreground',
+                                    isActive
+                                        ? 'bg-background text-foreground'
+                                        : 'text-muted-foreground',
                                 )}
                             >
                                 {formatCount(tab.count)}
@@ -236,7 +307,11 @@ function SortHeader({
     align?: 'left' | 'right';
 }) {
     const isActive = current === sortKey;
-    const Icon = isActive ? (direction === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown;
+    const Icon = isActive
+        ? direction === 'asc'
+            ? ArrowUp
+            : ArrowDown
+        : ArrowUpDown;
 
     return (
         <button
@@ -270,23 +345,36 @@ function IssueRowItem({
                 GRID_COLS,
             )}
         >
-            <Link href={href} className="font-mono text-xs text-muted-foreground hover:text-foreground">
+            <Link
+                href={href}
+                className="font-mono text-xs text-muted-foreground hover:text-foreground"
+            >
                 {issue.display_number}
             </Link>
 
             <Sparkline values={issue.sparkline} />
 
             <Link href={href} className="min-w-0">
-                <div className="truncate text-sm font-medium text-foreground" title={issue.short_class}>
+                <div
+                    className="truncate text-sm font-medium text-foreground"
+                    title={issue.short_class}
+                >
                     {issue.short_class}
                 </div>
-                <div className="truncate font-mono text-[11px] text-muted-foreground" title={issue.first_message}>
+                <div
+                    className="truncate font-mono text-[11px] text-muted-foreground"
+                    title={issue.first_message}
+                >
                     {issue.first_message || '—'}
                 </div>
             </Link>
 
-            <span className="text-right font-mono text-sm tabular-nums">{formatCount(issue.total_count)}</span>
-            <span className="text-right font-mono text-sm tabular-nums">{formatCount(issue.users_count)}</span>
+            <span className="text-right font-mono text-sm tabular-nums">
+                {formatCount(issue.total_count)}
+            </span>
+            <span className="text-right font-mono text-sm tabular-nums">
+                {formatCount(issue.users_count)}
+            </span>
             <span className="text-right font-mono text-[11px] text-muted-foreground">
                 {formatRelative(issue.first_occurrence_at)}
             </span>
@@ -298,7 +386,9 @@ function IssueRowItem({
                 {issue.assigned_to ? (
                     <>
                         <Avatar name={issue.assigned_to.name} />
-                        <span className="truncate text-xs">{issue.assigned_to.name}</span>
+                        <span className="truncate text-xs">
+                            {issue.assigned_to.name}
+                        </span>
                     </>
                 ) : (
                     <Avatar name="?" muted />
@@ -327,9 +417,15 @@ function Sparkline({ values }: { values: number[] }) {
     const barWidth = width / data.length;
 
     return (
-        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="text-muted-foreground/60">
+        <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            className="text-muted-foreground/60"
+        >
             {data.map((value, i) => {
                 const h = Math.max(1, (value / max) * height);
+
                 return (
                     <rect
                         key={i}
@@ -347,14 +443,30 @@ function Sparkline({ values }: { values: number[] }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-    const config: Record<string, { label: string; dot: string; text: string }> = {
-        unresolved: { label: 'Open', dot: 'bg-blue-500', text: 'text-foreground' },
-        resolved: { label: 'Resolved', dot: 'bg-emerald-500', text: 'text-foreground' },
-        ignored: { label: 'Ignored', dot: 'bg-muted-foreground', text: 'text-muted-foreground' },
-    };
+    const config: Record<string, { label: string; dot: string; text: string }> =
+        {
+            unresolved: {
+                label: 'Open',
+                dot: 'bg-blue-500',
+                text: 'text-foreground',
+            },
+            resolved: {
+                label: 'Resolved',
+                dot: 'bg-emerald-500',
+                text: 'text-foreground',
+            },
+            ignored: {
+                label: 'Ignored',
+                dot: 'bg-muted-foreground',
+                text: 'text-muted-foreground',
+            },
+        };
     const c = config[status] ?? config.unresolved;
+
     return (
-        <span className={cn('inline-flex items-center gap-1.5 text-xs', c.text)}>
+        <span
+            className={cn('inline-flex items-center gap-1.5 text-xs', c.text)}
+        >
             <span className={cn('h-1.5 w-1.5 rounded-full', c.dot)} />
             {c.label}
         </span>
@@ -369,6 +481,7 @@ function PriorityBadge({ priority }: { priority: string }) {
         high: { label: 'High', className: 'text-rose-500' },
     };
     const c = config[priority] ?? config.none;
+
     return <span className={cn('text-xs', c.className)}>{c.label}</span>;
 }
 
@@ -392,7 +505,9 @@ function EmptyState() {
     return (
         <div className="flex flex-col items-center justify-center px-6 py-20 text-center">
             <p className="text-sm font-medium">No issues match the filter</p>
-            <p className="mt-1 text-xs text-muted-foreground">Try widening the status filter.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+                Try widening the status filter.
+            </p>
         </div>
     );
 }
@@ -401,17 +516,34 @@ function formatCount(n: number): string {
     if (n >= 1000) {
         return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
     }
+
     return n.toLocaleString();
 }
 
 function formatRelative(iso: string | null): string {
-    if (!iso) return '—';
+    if (!iso) {
+        return '—';
+    }
+
     const date = new Date(iso);
     const diff = Date.now() - date.getTime();
     const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)}d ago`;
+
+    if (seconds < 60) {
+        return `${seconds}s ago`;
+    }
+
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)}m ago`;
+    }
+
+    if (seconds < 86400) {
+        return `${Math.floor(seconds / 3600)}h ago`;
+    }
+
+    if (seconds < 86400 * 30) {
+        return `${Math.floor(seconds / 86400)}d ago`;
+    }
+
     return date.toLocaleDateString();
 }

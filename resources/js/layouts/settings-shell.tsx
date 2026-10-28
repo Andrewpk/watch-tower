@@ -1,5 +1,11 @@
 import { Link, router, usePage } from '@inertiajs/react';
-import { ArrowLeft, FolderKanban, LogOut, ShieldCheck, UserRound } from 'lucide-react';
+import {
+    ArrowLeft,
+    FolderKanban,
+    LogOut,
+    ShieldCheck,
+    UserRound,
+} from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -80,6 +86,7 @@ export function SettingsShell({ children }: SettingsShellProps) {
                     {items.map((item) => {
                         const active = item.matches(path);
                         const Icon = item.icon;
+
                         return (
                             <Link
                                 key={item.label}
@@ -101,8 +108,12 @@ export function SettingsShell({ children }: SettingsShellProps) {
                 <div className="mt-auto px-3 py-4">
                     <Separator className="mb-3" />
                     <div className="mb-2 px-1 text-[11px] leading-tight">
-                        <div className="font-medium text-foreground">Signed in as</div>
-                        <div className="truncate text-muted-foreground">{user?.email}</div>
+                        <div className="font-medium text-foreground">
+                            Signed in as
+                        </div>
+                        <div className="truncate text-muted-foreground">
+                            {user?.email}
+                        </div>
                     </div>
                     <Button
                         variant="ghost"

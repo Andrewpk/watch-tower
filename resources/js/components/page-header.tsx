@@ -20,7 +20,13 @@ type PageHeaderProps = {
 
 const RANGES = ['15m', '1h', '24h', '7d', '14d', '30d'] as const;
 
-export function PageHeader({ title, breadcrumbs, selectedRange, onRangeChange, actions }: PageHeaderProps) {
+export function PageHeader({
+    title,
+    breadcrumbs,
+    selectedRange,
+    onRangeChange,
+    actions,
+}: PageHeaderProps) {
     return (
         <header className="border-b border-border bg-background px-6 py-4">
             {breadcrumbs ? (
@@ -28,26 +34,43 @@ export function PageHeader({ title, breadcrumbs, selectedRange, onRangeChange, a
                     {breadcrumbs.map((crumb, i) => (
                         <span key={i} className="flex items-center gap-1">
                             {crumb.href ? (
-                                <Link href={crumb.href} className="hover:text-foreground">
+                                <Link
+                                    href={crumb.href}
+                                    className="hover:text-foreground"
+                                >
                                     {crumb.label}
                                 </Link>
                             ) : (
                                 <span>{crumb.label}</span>
                             )}
-                            {i < breadcrumbs.length - 1 ? <ChevronRight className="h-3 w-3" /> : null}
+                            {i < breadcrumbs.length - 1 ? (
+                                <ChevronRight className="h-3 w-3" />
+                            ) : null}
                         </span>
                     ))}
                 </nav>
             ) : null}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
-                <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+                <h1 className="text-xl font-semibold tracking-tight">
+                    {title}
+                </h1>
 
                 <div className="flex items-center gap-3">
-                    {selectedRange ? <RangeTabs value={selectedRange} onChange={onRangeChange} /> : null}
+                    {selectedRange ? (
+                        <RangeTabs
+                            value={selectedRange}
+                            onChange={onRangeChange}
+                        />
+                    ) : null}
                     {actions ? (
                         <>
-                            {selectedRange ? <Separator orientation="vertical" className="h-6" /> : null}
+                            {selectedRange ? (
+                                <Separator
+                                    orientation="vertical"
+                                    className="h-6"
+                                />
+                            ) : null}
                             {actions}
                         </>
                     ) : null}
@@ -57,18 +80,28 @@ export function PageHeader({ title, breadcrumbs, selectedRange, onRangeChange, a
     );
 }
 
-function RangeTabs({ value, onChange }: { value: string; onChange?: (range: string) => void }) {
+function RangeTabs({
+    value,
+    onChange,
+}: {
+    value: string;
+    onChange?: (range: string) => void;
+}) {
     return (
         <Tabs
             value={value}
             onValueChange={(range) => {
                 if (onChange) {
                     onChange(range);
+
                     return;
                 }
+
                 const url = new URL(window.location.href);
                 url.searchParams.set('range', range);
-                router.visit(url.pathname + url.search, { preserveScroll: true });
+                router.visit(url.pathname + url.search, {
+                    preserveScroll: true,
+                });
             }}
         >
             <TabsList className="h-8">

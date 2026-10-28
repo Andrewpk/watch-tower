@@ -1,5 +1,12 @@
 import { router } from '@inertiajs/react';
-import { ChevronDown, ChevronUp, ExternalLink, Search, User, X } from 'lucide-react';
+import {
+    ChevronDown,
+    ChevronUp,
+    ExternalLink,
+    Search,
+    User,
+    X,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { PageHeader } from '@/components/page-header';
@@ -7,7 +14,13 @@ import { Pagination } from '@/components/pagination';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { AppLayout } from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
@@ -29,15 +42,26 @@ type Props = {
     users: string[];
     levels: string[];
     selectedRange: string;
-    filters: { search: string | null; level: string | null; user: string | null };
+    filters: {
+        search: string | null;
+        level: string | null;
+        user: string | null;
+    };
 };
 
-export default function LogsIndex({ logs, users, levels, selectedRange, filters }: Props) {
+export default function LogsIndex({
+    logs,
+    users,
+    levels,
+    selectedRange,
+    filters,
+}: Props) {
     const [search, setSearch] = useState(filters.search ?? '');
     const [selected, setSelected] = useState<Log | null>(null);
 
     const visit = (params: Record<string, string | number | null>) => {
         const url = new URL(window.location.href);
+
         for (const [key, value] of Object.entries(params)) {
             if (value === null || value === '') {
                 url.searchParams.delete(key);
@@ -45,7 +69,11 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                 url.searchParams.set(key, String(value));
             }
         }
-        router.visit(url.pathname + url.search, { preserveScroll: true, preserveState: true });
+
+        router.visit(url.pathname + url.search, {
+            preserveScroll: true,
+            preserveState: true,
+        });
     };
 
     const onSearchSubmit = (e: React.FormEvent) => {
@@ -61,7 +89,10 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                 selectedRange={selectedRange}
                 actions={
                     <div className="flex items-center gap-2">
-                        <form onSubmit={onSearchSubmit} className="relative w-64">
+                        <form
+                            onSubmit={onSearchSubmit}
+                            className="relative w-64"
+                        >
                             <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                             <Input
                                 value={search}
@@ -71,10 +102,17 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                             />
                         </form>
                         <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] tracking-wider text-muted-foreground uppercase">Level</span>
+                            <span className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                                Level
+                            </span>
                             <Select
                                 value={filters.level ?? 'all'}
-                                onValueChange={(value) => visit({ level: value === 'all' ? null : value, page: null })}
+                                onValueChange={(value) =>
+                                    visit({
+                                        level: value === 'all' ? null : value,
+                                        page: null,
+                                    })
+                                }
                             >
                                 <SelectTrigger className="h-8 w-28 text-xs">
                                     <SelectValue placeholder="All" />
@@ -82,7 +120,11 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                                 <SelectContent>
                                     <SelectItem value="all">All</SelectItem>
                                     {levels.map((lvl) => (
-                                        <SelectItem key={lvl} value={lvl} className="capitalize">
+                                        <SelectItem
+                                            key={lvl}
+                                            value={lvl}
+                                            className="capitalize"
+                                        >
                                             {lvl}
                                         </SelectItem>
                                     ))}
@@ -91,7 +133,12 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                         </div>
                         <Select
                             value={filters.user ?? 'all'}
-                            onValueChange={(value) => visit({ user: value === 'all' ? null : value, page: null })}
+                            onValueChange={(value) =>
+                                visit({
+                                    user: value === 'all' ? null : value,
+                                    page: null,
+                                })
+                            }
                         >
                             <SelectTrigger className="h-8 w-36 text-xs">
                                 <User className="mr-1.5 h-3.5 w-3.5" />
@@ -128,16 +175,31 @@ export default function LogsIndex({ logs, users, levels, selectedRange, filters 
                             ))}
                         </ul>
                     )}
-                    <Pagination links={logs.links} from={logs.from} to={logs.to} total={logs.total} />
+                    <Pagination
+                        links={logs.links}
+                        from={logs.from}
+                        to={logs.to}
+                        total={logs.total}
+                    />
                 </div>
             </div>
 
-            {selected ? <DetailPanel log={selected} onClose={() => setSelected(null)} /> : null}
+            {selected ? (
+                <DetailPanel log={selected} onClose={() => setSelected(null)} />
+            ) : null}
         </AppLayout>
     );
 }
 
-function LogRow({ log, active, onClick }: { log: Log; active: boolean; onClick: () => void }) {
+function LogRow({
+    log,
+    active,
+    onClick,
+}: {
+    log: Log;
+    active: boolean;
+    onClick: () => void;
+}) {
     return (
         <li>
             <button
@@ -148,15 +210,23 @@ function LogRow({ log, active, onClick }: { log: Log; active: boolean; onClick: 
                     active && 'bg-muted/60',
                 )}
             >
-                <span className="w-44 shrink-0 text-muted-foreground">{formatStamp(log.occurred_at)}</span>
+                <span className="w-44 shrink-0 text-muted-foreground">
+                    {formatStamp(log.occurred_at)}
+                </span>
                 {log.source_type ? (
-                    <Badge variant="muted" className="font-mono text-[10px] uppercase">
+                    <Badge
+                        variant="muted"
+                        className="font-mono text-[10px] uppercase"
+                    >
                         {log.source_type}
                     </Badge>
                 ) : (
                     <span className="w-16 shrink-0" />
                 )}
-                <span className="w-40 shrink-0 truncate text-muted-foreground" title={log.source_label ?? ''}>
+                <span
+                    className="w-40 shrink-0 truncate text-muted-foreground"
+                    title={log.source_label ?? ''}
+                >
                     {log.source_label ?? '—'}
                 </span>
                 <LevelBadge level={log.level} />
@@ -183,60 +253,85 @@ function DetailPanel({ log, onClose }: { log: Log; onClose: () => void }) {
                 aria-hidden="true"
             />
             <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-full max-w-[440px] flex-col overflow-y-auto border-l border-border bg-card shadow-2xl">
-            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={onClose} aria-label="Close">
-                    <X className="h-4 w-4" />
-                </Button>
-                <span className="font-mono text-xs text-muted-foreground">{formatStampFull(log.occurred_at)}</span>
-            </div>
-
-            <div className="space-y-5 px-5 py-5">
-                <div>
-                    <div className="flex items-start gap-2">
-                        <LevelBadge level={log.level} />
-                        <p className="text-sm leading-snug break-words">{log.message}</p>
-                    </div>
+                <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={onClose}
+                        aria-label="Close"
+                    >
+                        <X className="h-4 w-4" />
+                    </Button>
+                    <span className="font-mono text-xs text-muted-foreground">
+                        {formatStampFull(log.occurred_at)}
+                    </span>
                 </div>
 
-                <Separator />
-
-                <div>
-                    <div className="mb-2 flex items-center justify-between">
-                        <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Source</span>
-                        {log.source_type ? (
-                            <button
-                                type="button"
-                                className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 font-mono text-[10px] tracking-wider uppercase text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                            >
-                                {log.source_type}
-                                <ExternalLink className="h-3 w-3" />
-                            </button>
-                        ) : null}
-                    </div>
-                    <div className="rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-xs">
-                        {log.source_label ?? <span className="text-muted-foreground">—</span>}
-                    </div>
-                </div>
-
-                {log.user_name ? (
+                <div className="space-y-5 px-5 py-5">
                     <div>
-                        <div className="mb-2 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">User</div>
-                        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">{log.user_name}</div>
+                        <div className="flex items-start gap-2">
+                            <LevelBadge level={log.level} />
+                            <p className="text-sm leading-snug break-words">
+                                {log.message}
+                            </p>
+                        </div>
                     </div>
-                ) : null}
 
-                <ContextBlock context={log.context} />
-            </div>
-        </aside>
+                    <Separator />
+
+                    <div>
+                        <div className="mb-2 flex items-center justify-between">
+                            <span className="text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                                Source
+                            </span>
+                            {log.source_type ? (
+                                <button
+                                    type="button"
+                                    className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2.5 py-1 font-mono text-[10px] tracking-wider text-muted-foreground uppercase transition-colors hover:bg-muted hover:text-foreground"
+                                >
+                                    {log.source_type}
+                                    <ExternalLink className="h-3 w-3" />
+                                </button>
+                            ) : null}
+                        </div>
+                        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 font-mono text-xs">
+                            {log.source_label ?? (
+                                <span className="text-muted-foreground">—</span>
+                            )}
+                        </div>
+                    </div>
+
+                    {log.user_name ? (
+                        <div>
+                            <div className="mb-2 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                                User
+                            </div>
+                            <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs">
+                                {log.user_name}
+                            </div>
+                        </div>
+                    ) : null}
+
+                    <ContextBlock context={log.context} />
+                </div>
+            </aside>
         </>
     );
 }
 
-function ContextBlock({ context }: { context: Record<string, unknown> | null }) {
+function ContextBlock({
+    context,
+}: {
+    context: Record<string, unknown> | null;
+}) {
     const [open, setOpen] = useState(true);
+
     if (!context || Object.keys(context).length === 0) {
         return null;
     }
+
     const count = Object.keys(context).length;
 
     return (
@@ -249,7 +344,11 @@ function ContextBlock({ context }: { context: Record<string, unknown> | null }) 
                 <span>Log Context</span>
                 <span className="flex items-center gap-1 normal-case">
                     {count} {count === 1 ? 'item' : 'items'}
-                    {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                    {open ? (
+                        <ChevronUp className="h-3 w-3" />
+                    ) : (
+                        <ChevronDown className="h-3 w-3" />
+                    )}
                 </span>
             </button>
             {open ? (
@@ -262,12 +361,37 @@ function ContextBlock({ context }: { context: Record<string, unknown> | null }) 
 }
 
 function JsonView({ value, indent }: { value: unknown; indent: number }) {
-    if (value === null) return <span className="text-muted-foreground">null</span>;
-    if (typeof value === 'string') return <span className="text-rose-500 dark:text-rose-400">"{value}"</span>;
-    if (typeof value === 'number') return <span className="text-emerald-600 dark:text-emerald-400">{value}</span>;
-    if (typeof value === 'boolean') return <span className="text-amber-600 dark:text-amber-400">{String(value)}</span>;
+    if (value === null) {
+        return <span className="text-muted-foreground">null</span>;
+    }
+
+    if (typeof value === 'string') {
+        return (
+            <span className="text-rose-500 dark:text-rose-400">"{value}"</span>
+        );
+    }
+
+    if (typeof value === 'number') {
+        return (
+            <span className="text-emerald-600 dark:text-emerald-400">
+                {value}
+            </span>
+        );
+    }
+
+    if (typeof value === 'boolean') {
+        return (
+            <span className="text-amber-600 dark:text-amber-400">
+                {String(value)}
+            </span>
+        );
+    }
+
     if (Array.isArray(value)) {
-        if (value.length === 0) return <>[]</>;
+        if (value.length === 0) {
+            return <>[]</>;
+        }
+
         return (
             <>
                 {'['}
@@ -281,15 +405,22 @@ function JsonView({ value, indent }: { value: unknown; indent: number }) {
             </>
         );
     }
+
     if (typeof value === 'object') {
         const entries = Object.entries(value as Record<string, unknown>);
-        if (entries.length === 0) return <>{'{}'}</>;
+
+        if (entries.length === 0) {
+            return <>{'{}'}</>;
+        }
+
         return (
             <>
                 {'{'}
                 {entries.map(([k, v], i) => (
                     <div key={k} style={{ paddingLeft: (indent + 1) * 12 }}>
-                        <span className="text-rose-600 dark:text-rose-400">"{k}"</span>
+                        <span className="text-rose-600 dark:text-rose-400">
+                            "{k}"
+                        </span>
                         <span className="text-muted-foreground">: </span>
                         <JsonView value={v} indent={indent + 1} />
                         {i < entries.length - 1 ? ',' : ''}
@@ -299,12 +430,23 @@ function JsonView({ value, indent }: { value: unknown; indent: number }) {
             </>
         );
     }
+
     return <>{String(value)}</>;
 }
 
 function LevelBadge({ level }: { level: string }) {
     const color = levelColor(level);
-    return <span className={cn('font-mono text-[10px] tracking-wider uppercase', color)}>[{level}]</span>;
+
+    return (
+        <span
+            className={cn(
+                'font-mono text-[10px] tracking-wider uppercase',
+                color,
+            )}
+        >
+            [{level}]
+        </span>
+    );
 }
 
 function levelColor(level: string): string {
@@ -346,23 +488,33 @@ function levelDotColor(level: string): string {
 }
 
 function formatStamp(iso: string | null): string {
-    if (!iso) return '';
+    if (!iso) {
+        return '';
+    }
+
     const d = new Date(iso);
     const date = d.toISOString().slice(0, 10);
     const time = d.toISOString().slice(11, 19);
+
     return `${date} ${time} UTC`;
 }
 
 function formatStampFull(iso: string | null): string {
-    if (!iso) return '';
+    if (!iso) {
+        return '';
+    }
+
     const d = new Date(iso);
-    return d.toLocaleString([], {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZone: 'UTC',
-    }) + ' UTC';
+
+    return (
+        d.toLocaleString([], {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZone: 'UTC',
+        }) + ' UTC'
+    );
 }

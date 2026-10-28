@@ -21,7 +21,6 @@ class AuthenticateNightwatchIngest
     {
         $token = $request->bearerToken();
 
-
         if (! $token) {
             return $this->unauthorized('Missing ingest token');
         }

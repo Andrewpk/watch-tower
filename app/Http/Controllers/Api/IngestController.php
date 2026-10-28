@@ -9,8 +9,6 @@ use App\Models\Project;
 use App\Watch\EventStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Str;
-use Illuminate\Http\Request;
-
 
 class IngestController extends Controller
 {
@@ -50,6 +48,4 @@ class IngestController extends Controller
             'events_stored' => count($events),
         ]);
     }
-
-
 }
