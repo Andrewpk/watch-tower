@@ -119,6 +119,12 @@ ENV APP_ENV=production \
     PHP_OPCACHE_ENABLE=1 \
     TELESCOPE_ENABLED=false
 
+# By default the base image's Caddy replaces REMOTE_ADDR with a client IP taken
+# from CF-Connecting-IP or X-Forwarded-For whenever the peer has a private or
+# Cloudflare address, so clients behind an ordinary reverse proxy could choose
+# their own IP. Turn that off: Laravel's TRUSTED_PROXIES is the only trust setting.
+ENV TRUSTED_PROXY=off
+
 # vendor changes least often, so it gets its own layer.
 COPY --from=build --chown=www-data:www-data /var/www/html/vendor ./vendor
 COPY --from=build --chown=www-data:www-data /dist ./

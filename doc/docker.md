@@ -17,10 +17,10 @@ Nothing secret is baked into the image. Pass settings with `-e` or `--env-file`.
 | `APP_KEY` | **Required.** Generate one with `echo "base64:$(openssl rand -base64 32)"`. Keep it stable between restarts. |
 | `APP_URL` | **Required.** The public URL, for example `https://watch.example.com`. |
 | `DB_*` | Defaults to SQLite at `/var/www/html/storage/database/database.sqlite`. For MySQL 8 set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`. PostgreSQL is not supported yet ([#19](https://github.com/Andrewpk/watch-tower/issues/19)). |
-| `TRUSTED_PROXIES` | Off by default. Set it, together with `TRUSTED_PROXY=off`, when a reverse proxy or load balancer terminates TLS in front of the container. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
+| `TRUSTED_PROXIES` | Off by default. Set it when a reverse proxy or load balancer terminates TLS in front of the container. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 | `AUTORUN_ENABLED` | Defaults to `false`. Set `true` on the web container to run migrations and cache config, routes, views and events on every start. |
 
-The image sets `APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr` (read logs with `docker logs`), `HEALTHCHECK_PATH=/up` and `TELESCOPE_ENABLED=false`.
+The image sets `APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr` (read logs with `docker logs`), `HEALTHCHECK_PATH=/up`, `TELESCOPE_ENABLED=false` and `TRUSTED_PROXY=off` (see [Behind a reverse proxy](#behind-a-reverse-proxy)).
 
 ## Persistent data
 
@@ -50,14 +50,15 @@ docker exec watch-tower php artisan db:seed --class=SuperAdminSeeder --force
 When a proxy terminates TLS, the container only sees plain HTTP. Laravel then ignores `X-Forwarded-Proto` and `X-Forwarded-Host`, so redirects and asset URLs use `http://` (browsers block them as mixed content on an `https://` page) and every user appears to come from the proxy's IP address. Make your proxy send `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`, then set:
 
 ```bash
--e TRUSTED_PROXIES='*' -e TRUSTED_PROXY=off
+-e TRUSTED_PROXIES='*'
 ```
 
 - `TRUSTED_PROXIES='*'` trusts whichever peer connects. Use it only when the container is reachable through your proxy alone (an internal Docker network, or a port that is not published). If clients can reach the container directly, they can forge `X-Forwarded-For` to pick their own IP and get around login throttling.
 - `TRUSTED_PROXIES='10.0.0.0/8,172.16.0.0/12'` trusts only the listed IPs and CIDR ranges. Use it when other hosts can reach the container, or when several proxies sit in front of it (`*` trusts only the immediate peer).
-- `TRUSTED_PROXY=off` is a setting of the base image (note the singular name). By default it makes Caddy replace the connection's address with the client IP from `X-Forwarded-For` when the peer is in a private or Cloudflare range. Laravel would then see the client instead of the proxy as the peer: a CIDR list never matches, and with `*` a forged leading `X-Forwarded-For` entry can override the real address.
 
-Leave both unset if the container is not behind a proxy.
+Leave it unset if the container is not behind a proxy.
+
+The image sets the base image's `TRUSTED_PROXY` (note the singular name) to `off`. Its default, `cloudflare`, makes Caddy replace the connection's address with a client IP from `CF-Connecting-IP` or `X-Forwarded-For` whenever the peer has a private or Cloudflare address. Behind a proxy that passes those headers through, clients could then choose their own IP, and a `TRUSTED_PROXIES` list would never match. Leave it `off` and use `TRUSTED_PROXIES` instead.
 
 ## Queue worker and scheduler
 
