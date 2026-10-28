@@ -9,6 +9,7 @@ use App\Http\Middleware\AuthenticateNightwatchIngest;
 use Illuminate\Support\Facades\Route;
 
 Route::middleware(AuthenticateIngestRequest::class)
+    ->prefix('ingest')
     ->group(function () {
         Route::post('/', [IngestController::class, 'batch'])->name('api.ingest.batch');
         Route::post('/sync', [IngestController::class, 'sync'])->name('api.ingest.sync');
