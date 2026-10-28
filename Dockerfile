@@ -1,12 +1,16 @@
 # Production image for Watch Tower (Laravel + Inertia + React) on FrankenPHP.
 #
 #   docker build -t watch-tower .
-#   docker build --build-arg PHP_IMAGE=serversideup/php:8.4-frankenphp -t watch-tower .
+#   docker build --build-arg PHP_IMAGE=serversideup/php:8.5-frankenphp-trixie -t watch-tower .
+#
+# The PHP image is pinned by digest, so every build gets the same PHP and OS packages. Dependabot
+# moves the pin. To find a digest:
+#   docker buildx imagetools inspect serversideup/php:<tag>
 #
 # The base image runs as the unprivileged www-data user, serves on port 8080
 # and keeps the app in /var/www/html. See https://serversideup.net/open-source/docker-php/docs
 
-ARG PHP_IMAGE=serversideup/php:8-frankenphp
+ARG PHP_IMAGE=serversideup/php:8.4-frankenphp-trixie-v5.0.2@sha256:a535961aa62a118860292b3b04f689ee56a07f47938a614660e67fe98ff6853f
 ARG NODE_IMAGE=node:24-bookworm-slim
 
 # ---------------------------------------------------------------------------
@@ -100,11 +104,17 @@ WORKDIR /var/www/html
 # AUTORUN_ENABLED is left at the base image default (false). Set it to true on
 # the web container to run migrations and the config/route/view/event caches
 # on every start. Leave it off for queue and scheduler containers.
+#
+# SQLite: WAL lets reads run while a write is in progress, and the busy timeout
+# makes a second writer wait up to 5 seconds instead of failing with
+# "database is locked" during bursts of ingest.
 ENV APP_ENV=production \
     APP_DEBUG=false \
     LOG_CHANNEL=stderr \
     DB_CONNECTION=sqlite \
     DB_DATABASE=/var/www/html/storage/database/database.sqlite \
+    DB_JOURNAL_MODE=wal \
+    DB_BUSY_TIMEOUT=5000 \
     HEALTHCHECK_PATH=/up \
     PHP_OPCACHE_ENABLE=1 \
     TELESCOPE_ENABLED=false

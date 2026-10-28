@@ -9,3 +9,12 @@ updates:
     groups:
       actions:
         patterns: ['*']
+
+  # The Dockerfile pins its base images by digest; this moves the pins.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      images:
+        patterns: ['*']
