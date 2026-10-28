@@ -1,11 +1,15 @@
 {
     "$schema": "https://getcomposer.org/schema.json",
-    "name": "laravel/blank-react-starter-kit",
+    "name": "andrewpk/watch-tower",
     "type": "project",
-    "description": "The skeleton application for the Laravel framework.",
+    "description": "Self-hosted observability dashboard for Laravel apps that receives Laravel Nightwatch telemetry.",
     "keywords": [
         "laravel",
-        "framework"
+        "nightwatch",
+        "observability",
+        "monitoring",
+        "apm",
+        "self-hosted"
     ],
     "license": "MIT",
     "require": {

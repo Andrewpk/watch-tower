@@ -1,0 +1,86 @@
+name: Bug report
+description: Something in Watch Tower is not working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please search existing issues first.
+        For security vulnerabilities, do not use this form. Use the "Security vulnerability" link on the issue chooser instead.
+  - type: input
+    id: version
+    attributes:
+      label: Watch Tower version or commit
+      description: A release tag such as `v1.2.3`, a Docker image tag, or a commit SHA from `git rev-parse --short HEAD`.
+      placeholder: v1.2.3
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Docker image
+        - From source
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: php
+    attributes:
+      label: PHP version
+      description: Output of `php -v`. For the Docker image, the PHP version is in the image tag or build args.
+      placeholder: "8.4.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options:
+        - SQLite
+        - MySQL
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: nightwatch
+    attributes:
+      label: Nightwatch client version
+      description: The `laravel/nightwatch` version in the monitored app (`composer show laravel/nightwatch`). Write "n/a" if the bug is not related to ingest.
+      placeholder: v1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include screenshots if they help.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from `storage/logs/laravel.log` or `docker logs`, and the browser console if the problem is in the UI. Remove secrets such as `APP_KEY`, API keys and tokens first.
+      render: shell
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
