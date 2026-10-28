@@ -5,6 +5,7 @@ namespace App\Models;
 use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -28,11 +29,28 @@ class Project extends Model
     /** @use HasFactory<ProjectFactory> */
     use HasFactory, HasUuids;
 
+    /**
+     * Hide projects that are being deleted.
+     *
+     * `deleting_at` is set by the delete action and the queued
+     * `DeleteProjectData` job removes the row once its telemetry is gone. The
+     * `notDeleting` scope keeps the project out of every query in between:
+     * lists, route binding, ingest authentication and queued events. The job
+     * opts out with `Project::withoutGlobalScope('notDeleting')`.
+     */
+    protected static function booted(): void
+    {
+        static::addGlobalScope('notDeleting', function (Builder $query): void {
+            $query->whereNull($query->getModel()->qualifyColumn('deleting_at'));
+        });
+    }
+
     protected function casts(): array
     {
         return [
             'sampling_rate' => 'float',
             'retention_days' => 'integer',
+            'deleting_at' => 'datetime',
         ];
     }
 
