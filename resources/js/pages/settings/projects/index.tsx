@@ -16,7 +16,7 @@ import ProjectAdminController from '@/actions/App/Http/Controllers/Settings/Proj
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsShell } from '@/layouts/settings-shell';
-import type { SharedProps } from '@/types/inertia';
+import type { NewApiKey, SharedProps } from '@/types/inertia';
 
 type Project = {
     id: string;
@@ -31,11 +31,6 @@ type Project = {
     admins_count: number;
     open_issues_count: number;
     created_at: string | null;
-};
-
-type NewApiKey = {
-    project: string;
-    key: string;
 };
 
 type Props = {
@@ -62,13 +57,11 @@ function formatDateTime(iso: string) {
 }
 
 export default function ProjectsIndex({ projects }: Props) {
-    const { props } = usePage<
-        SharedProps & {
-            flash?: { success?: string; new_api_key?: NewApiKey | null };
-        }
+    const { props, flash } = usePage<
+        SharedProps & { flash?: { success?: string } }
     >();
     const flashSuccess = props.flash?.success;
-    const flashedApiKey = props.flash?.new_api_key ?? null;
+    const flashedApiKey = flash.new_api_key ?? null;
     const [dismissedKey, setDismissedKey] = useState<string | null>(null);
     const newApiKey =
         flashedApiKey && flashedApiKey.key !== dismissedKey

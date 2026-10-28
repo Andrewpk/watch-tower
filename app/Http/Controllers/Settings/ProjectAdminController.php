@@ -7,6 +7,7 @@ use App\Jobs\DeleteProjectData;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
@@ -26,8 +27,21 @@ class ProjectAdminController extends Controller
      */
     public const ROTATION_GRACE_HOURS = [0, 1, 24, 168];
 
-    public function index(): Response
+    /**
+     * List the projects.
+     *
+     * A key flashed by `store()` or `rotateKey()` is handed to the page as
+     * Inertia flash data, which, unlike a prop, is kept out of the browser's
+     * history state, so Back or a session restore cannot show the key again.
+     */
+    public function index(Request $request): Response
     {
+        $newApiKey = $this->pullNewApiKey($request);
+
+        if ($newApiKey !== null) {
+            Inertia::flash('new_api_key', $newApiKey);
+        }
+
         $projects = Project::query()
             ->orderBy('name')
             ->withCount(['admins', 'errorGroups as open_issues_count' => function ($q) {
@@ -186,7 +200,7 @@ class ProjectAdminController extends Controller
      * The session flash that lets the next page show a new key once.
      *
      * The key is encrypted so that the plain text never sits in the session
-     * store; `HandleInertiaRequests` decrypts it for that one response.
+     * store; `pullNewApiKey()` decrypts it for that one response.
      *
      * @return array{project: string, key: string}
      */
@@ -196,6 +210,32 @@ class ProjectAdminController extends Controller
             'project' => $project->name,
             'key' => Crypt::encryptString($apiKey),
         ];
+    }
+
+    /**
+     * Take the flashed key out of the session and decrypt it.
+     *
+     * Pulling it removes it from the session, so the plain text only exists
+     * for the rest of this request.
+     *
+     * @return array{project: string, key: string}|null
+     */
+    private function pullNewApiKey(Request $request): ?array
+    {
+        $flashed = $request->session()->pull('new_api_key');
+
+        if (! is_array($flashed) || ! isset($flashed['project'], $flashed['key'])) {
+            return null;
+        }
+
+        try {
+            return [
+                'project' => $flashed['project'],
+                'key' => Crypt::decryptString($flashed['key']),
+            ];
+        } catch (DecryptException) {
+            return null;
+        }
     }
 
     /**

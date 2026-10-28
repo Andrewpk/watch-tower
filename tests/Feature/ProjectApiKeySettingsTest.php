@@ -6,6 +6,9 @@ use App\Models\User;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Testing\TestResponse;
+use Inertia\Support\SessionKey;
+use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     $this->withoutVite();
@@ -29,6 +32,16 @@ function newProjectInput(): array
 }
 
 /**
+ * The key an Inertia response shows once, read from the page's flash data.
+ *
+ * @return array{project: string, key: string}|null
+ */
+function shownApiKey(TestResponse $response): ?array
+{
+    return $response->inertiaPage()['flash']['new_api_key'] ?? null;
+}
+
+/**
  * Whether any column of any project row holds the given text.
  */
 function projectsTableContains(string $needle): bool
@@ -42,25 +55,52 @@ it('shows the full key once after creating a project', function () {
         ->assertRedirect(route('settings.projects.index'))
         ->assertSessionHas('success', 'Project created.');
 
-    $shown = $this->get(route('settings.projects.index'))->inertiaProps('flash.new_api_key');
+    $response = $this->get(route('settings.projects.index'));
+    $response->assertInertia(fn (AssertableInertia $page) => $page
+        ->hasFlash('new_api_key.project', 'Acme')
+        ->hasFlash('new_api_key.key'));
+    $shown = shownApiKey($response);
 
-    expect($shown['project'])->toBe('Acme')
-        ->and($shown['key'])->toStartWith('pk_')
+    expect($shown['key'])->toStartWith('pk_')
         ->and(Project::findByApiKey($shown['key'])?->slug)->toBe('acme')
         ->and(projectsTableContains($shown['key']))->toBeFalse();
 
-    expect($this->get(route('settings.projects.index'))->inertiaProps('flash.new_api_key'))->toBeNull();
+    $this->get(route('settings.projects.index'))
+        ->assertInertia(fn (AssertableInertia $page) => $page->missingFlash('new_api_key'));
+});
+
+it('keeps the key out of the page props, which end up in browser history', function () {
+    $this->actingAs($this->admin)->post(route('settings.projects.store'), newProjectInput());
+
+    $response = $this->get(route('settings.projects.index'));
+    $key = shownApiKey($response)['key'];
+
+    expect(json_encode($response->inertiaPage()['props']))->not->toContain($key)
+        ->and($response->inertiaProps('flash'))->not->toHaveKey('new_api_key');
 });
 
 it('keeps the plain-text key out of the session store', function () {
     $this->actingAs($this->admin)->post(route('settings.projects.store'), newProjectInput());
 
     $flashed = session('new_api_key');
-    $shown = $this->get(route('settings.projects.index'))->inertiaProps('flash.new_api_key');
+    $key = Crypt::decryptString($flashed['key']);
 
     expect($flashed)->toHaveKeys(['project', 'key'])
-        ->and(json_encode($flashed))->not->toContain($shown['key'])
-        ->and(Crypt::decryptString($flashed['key']))->toBe($shown['key']);
+        ->and(json_encode(session()->all()))->not->toContain($key);
+
+    $response = $this->get(route('settings.projects.index'));
+
+    expect(shownApiKey($response)['key'])->toBe($key)
+        ->and(json_encode(session()->all()))->not->toContain($key)
+        ->and(session('new_api_key'))->toBeNull()
+        ->and(session(SessionKey::FLASH_DATA))->toBeNull();
+});
+
+it('shows nothing when the flashed key cannot be decrypted', function () {
+    $this->actingAs($this->admin)
+        ->withSession(['new_api_key' => ['project' => 'Acme', 'key' => 'not-encrypted']])
+        ->get(route('settings.projects.index'))
+        ->assertInertia(fn (AssertableInertia $page) => $page->missingFlash('new_api_key'));
 });
 
 it('lists projects with the key prefix and last use but never the full key', function () {
@@ -86,15 +126,20 @@ it('rotates a key and shows the new one once', function () {
         ->assertRedirect(route('settings.projects.index'))
         ->assertSessionHas('success', "API key rotated for '{$project->name}'.");
 
-    $shown = $this->get(route('settings.projects.index'))->inertiaProps('flash.new_api_key');
+    $response = $this->get(route('settings.projects.index'));
+    $response->assertInertia(fn (AssertableInertia $page) => $page
+        ->hasFlash('new_api_key.project', $project->name)
+        ->hasFlash('new_api_key.key'));
+    $shown = shownApiKey($response);
 
-    expect($shown['project'])->toBe($project->name)
-        ->and(Project::findByApiKey($shown['key'])?->id)->toBe($project->id)
+    expect(Project::findByApiKey($shown['key'])?->id)->toBe($project->id)
         ->and(Project::findByApiKey('pk_test_old'))->toBeNull()
         ->and($project->fresh()->api_key_version)->toBe(2)
-        ->and(projectsTableContains($shown['key']))->toBeFalse();
+        ->and(projectsTableContains($shown['key']))->toBeFalse()
+        ->and(json_encode($response->inertiaPage()['props']))->not->toContain($shown['key']);
 
-    expect($this->get(route('settings.projects.index'))->inertiaProps('flash.new_api_key'))->toBeNull();
+    $this->get(route('settings.projects.index'))
+        ->assertInertia(fn (AssertableInertia $page) => $page->missingFlash('new_api_key'));
 });
 
 it('keeps the old key working for the chosen grace period and reports when it ends', function (int $hours) {
