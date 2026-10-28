@@ -45,7 +45,7 @@ There are two pieces to install — the Watch Tower server, and the Nightwatch c
 ### Quick start
 
 ```bash
-git clone <your-repo-url> watch-tower
+git clone https://github.com/Andrewpk/watch-tower.git
 cd watch-tower
 composer run setup
 composer run dev
@@ -74,6 +74,12 @@ For anything that fails or needs explanation, see [doc/install.md](doc/install.m
 <img width="2928" height="1730" alt="dashboard" src="https://github.com/user-attachments/assets/3afe51c6-9bd9-49f8-a111-7928bb57b77e" />
 <img width="2928" height="1730" alt="Requests" src="https://github.com/user-attachments/assets/3d58d925-3400-4fce-b7b8-718747464c02" />
 <img width="2928" height="1730" alt="issue" src="https://github.com/user-attachments/assets/917c138c-156a-4fde-84f2-0d959d497c75" />
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the checks CI runs and PR conventions. To report a security vulnerability, follow [SECURITY.md](SECURITY.md) instead of opening a public issue.
 
 ---
 
