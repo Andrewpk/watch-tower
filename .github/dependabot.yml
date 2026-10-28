@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # Workflow actions are pinned to commit SHAs; this keeps the pins current.
+  # One grouped PR per month keeps CI runs (and review noise) to a minimum.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ['*']

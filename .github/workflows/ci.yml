@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'doc/**'
+      - 'LICENSE'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'doc/**'
+      - 'LICENSE'
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PHP_VERSION: '8.4'
+  NODE_VERSION: '24'
+
+jobs:
+  checks:
+    name: Lint & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          coverage: none
+
+      - name: Cache vendor
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor
+          key: vendor-${{ runner.os }}-php${{ env.PHP_VERSION }}-${{ hashFiles('composer.lock') }}
+
+      - name: Install Composer dependencies
+        id: composer
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      # Check steps run even if an earlier check fails, so one run reports every failure.
+      - name: Pint
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        run: vendor/bin/pint --test
+
+      - name: Pest (unit + feature)
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        run: php artisan test --compact --ci
+
+      - name: Migrations (up, rollback, up) on SQLite
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        env:
+          # testing, not production, so DB::prohibitDestructiveCommands() allows rollback
+          APP_ENV: testing
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ${{ runner.temp }}/ci.sqlite
+        run: |
+          touch "$DB_DATABASE"
+          php artisan migrate --force --no-interaction
+          php artisan migrate:rollback --force --no-interaction
+          php artisan migrate --force --no-interaction
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      # node_modules itself is cached, so a lockfile-unchanged run skips `npm ci` entirely.
+      - name: Cache node_modules
+        id: node-modules
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+
+      - name: Install npm dependencies
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' && steps.node-modules.outputs.cache-hit != 'true' }}
+        run: npm ci --no-audit --no-fund
+
+      # tsc needs Wayfinder's generated route/action files (gitignored); --with-form matches vite.config.ts.
+      - name: Generate Wayfinder types
+        id: frontend
+        if: ${{ !cancelled() && steps.composer.outcome == 'success' }}
+        run: php artisan wayfinder:generate --with-form
+
+      - name: ESLint
+        if: ${{ !cancelled() && steps.frontend.outcome == 'success' }}
+        run: npm run lint:check
+
+      - name: Prettier
+        if: ${{ !cancelled() && steps.frontend.outcome == 'success' }}
+        run: npm run format:check
+
+      - name: TypeScript
+        if: ${{ !cancelled() && steps.frontend.outcome == 'success' }}
+        run: npm run types:check
