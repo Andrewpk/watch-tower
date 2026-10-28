@@ -23,6 +23,7 @@ class UserStats
     public function summary(Project $project, TimeRange $range): array
     {
         $base = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereBetween('occurred_at', [$range->from, $range->to]);
 
@@ -92,6 +93,7 @@ class UserStats
     public function list(Project $project, TimeRange $range, ?string $search = null): array
     {
         $trace = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereNotNull('user_identifier')
             ->whereBetween('occurred_at', [$range->from, $range->to])
@@ -167,11 +169,13 @@ class UserStats
     public function detail(Project $project, string $userIdentifier, TimeRange $range): ?array
     {
         $base = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->where('user_identifier', $userIdentifier)
             ->whereBetween('occurred_at', [$range->from, $range->to]);
 
         $profile = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->where('user_identifier', $userIdentifier)
             ->orderByDesc('occurred_at')

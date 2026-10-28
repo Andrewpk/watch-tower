@@ -4,6 +4,8 @@ namespace App\Models;
 
 use Database\Factories\TraceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Scope;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -34,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'response_data',
     'has_errors',
     'has_slow_queries',
+    'is_stub',
     'occurred_at',
 ])]
 class Trace extends Model
@@ -55,8 +58,23 @@ class Trace extends Model
             'response_data' => 'array',
             'has_errors' => 'boolean',
             'has_slow_queries' => 'boolean',
+            'is_stub' => 'boolean',
             'occurred_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Restrict the query to traces backed by a real request record.
+     *
+     * A stub is created when a child record (query, exception, log, ...) arrives before its request record, so it
+     * carries placeholder request fields and must not be counted, bucketed or listed as a request.
+     *
+     * @param  Builder<Trace>  $query
+     */
+    #[Scope]
+    protected function excludingStubs(Builder $query): void
+    {
+        $query->where($query->qualifyColumn('is_stub'), false);
     }
 
     /**

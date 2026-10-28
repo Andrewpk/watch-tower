@@ -143,11 +143,10 @@ it('stores cache events linked to a trace by correlation id', function () {
         ->and($event->environment)->toBe('production');
 });
 
-it('stores log entries without a trace when correlation id is unknown', function () {
+it('stores log entries without a trace when the record carries no correlation id', function () {
     $this->store->store($this->project, [
         'type' => 'log',
         'data' => [
-            'request_id' => (string) Str::uuid(),
             'level' => 'warning',
             'message' => 'orphaned log',
         ],
@@ -159,15 +158,15 @@ it('stores log entries without a trace when correlation id is unknown', function
         ->and($log->level)->toBe('warning');
 });
 
-it('attaches queries to traces by correlation id and skips orphan queries', function () {
+it('attaches queries to traces by correlation id and keeps queries that arrive before the request', function () {
     $correlationId = (string) Str::uuid();
 
-    // Orphan query (no trace yet) is dropped.
+    // The query arrives first: it is kept against a stub trace instead of being dropped.
     $this->store->store($this->project, [
         'type' => 'query',
         'data' => ['request_id' => $correlationId, 'sql' => 'SELECT 1', 'duration_ms' => 1.5],
     ]);
-    expect(TraceQuery::count())->toBe(0);
+    expect(TraceQuery::count())->toBe(1);
 
     $this->store->store($this->project, [
         'type' => 'request',
@@ -179,9 +178,9 @@ it('attaches queries to traces by correlation id and skips orphan queries', func
     ]);
 
     $trace = Trace::where('correlation_id', $correlationId)->first();
-    expect(TraceQuery::where('trace_id', $trace->id)->count())->toBe(1);
+    expect(TraceQuery::where('trace_id', $trace->id)->count())->toBe(2);
 
-    $query = TraceQuery::first();
+    $query = TraceQuery::where('trace_id', $trace->id)->where('sql', 'SELECT * FROM users')->first();
     expect($query->query_type)->toBe('SELECT')
         ->and($query->is_slow)->toBeTrue();
 });

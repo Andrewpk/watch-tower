@@ -13,6 +13,7 @@ use App\Models\Trace;
 use App\Models\TraceQuery;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class EventStore
 {
@@ -38,6 +39,12 @@ class EventStore
     }
 
     /**
+     * Persist the request record, filling in the stub trace if child records arrived first.
+     *
+     * The trace is keyed on (project, correlation id), so a request can never touch another project's trace.
+     * `has_errors` and `has_slow_queries` are only ever raised: a request record that does not report them must not
+     * undo what the child records already flagged.
+     *
      * @param  array<string, mixed>  $data
      */
     private function storeRequest(Project $project, array $data): void
@@ -48,36 +55,49 @@ class EventStore
             return;
         }
 
-        Trace::updateOrCreate(
-            ['correlation_id' => $correlationId],
-            [
-                'project_id' => $project->id,
-                'method' => (string) ($data['method'] ?? 'GET'),
-                'uri' => (string) ($data['uri'] ?? '/'),
-                'status_code' => $this->intOrNull($data['status_code'] ?? null),
-                'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
-                'user_email' => $this->stringOrNull($data['user_email'] ?? null),
-                'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
-                'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
-                'db_time_ms' => (int) ($data['db_time_ms'] ?? 0),
-                'memory_used_kb' => $this->intOrNull($data['memory_used_kb'] ?? null),
-                'memory_peak_kb' => $this->intOrNull($data['memory_peak_kb'] ?? null),
-                'environment' => $this->stringOrNull($data['environment'] ?? null),
-                'release_version' => $this->stringOrNull($data['release'] ?? null),
-                'hostname' => $this->stringOrNull($data['hostname'] ?? null),
-                'ip_address' => $this->stringOrNull($data['ip_address'] ?? null),
-                'user_agent' => $this->stringOrNull($data['user_agent'] ?? null),
-                'headers' => $data['headers'] ?? null,
-                'request_data' => $data['request_data'] ?? null,
-                'response_data' => $data['response_data'] ?? null,
+        $values = [
+            'method' => (string) ($data['method'] ?? 'GET'),
+            'uri' => (string) ($data['uri'] ?? '/'),
+            'status_code' => $this->intOrNull($data['status_code'] ?? null),
+            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
+            'user_email' => $this->stringOrNull($data['user_email'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
+            'db_time_ms' => (int) ($data['db_time_ms'] ?? 0),
+            'memory_used_kb' => $this->intOrNull($data['memory_used_kb'] ?? null),
+            'memory_peak_kb' => $this->intOrNull($data['memory_peak_kb'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'release_version' => $this->stringOrNull($data['release'] ?? null),
+            'hostname' => $this->stringOrNull($data['hostname'] ?? null),
+            'ip_address' => $this->stringOrNull($data['ip_address'] ?? null),
+            'user_agent' => $this->stringOrNull($data['user_agent'] ?? null),
+            'headers' => $data['headers'] ?? null,
+            'request_data' => $data['request_data'] ?? null,
+            'response_data' => $data['response_data'] ?? null,
+            'is_stub' => false,
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? $data['timestamp'] ?? null),
+            ...array_filter([
                 'has_errors' => (bool) ($data['has_errors'] ?? false),
                 'has_slow_queries' => (bool) ($data['has_slow_queries'] ?? false),
-                'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? $data['timestamp'] ?? null),
-            ]
+            ]),
+        ];
+
+        $trace = Trace::firstOrCreate(
+            ['project_id' => $project->id, 'correlation_id' => $correlationId],
+            $values,
         );
+
+        if (! $trace->wasRecentlyCreated) {
+            $trace->fill($values)->save();
+        }
     }
 
     /**
+     * Persist a query against its trace, which is created as a stub if the request record has not arrived yet.
+     *
+     * A query without any correlation id has no trace to belong to (`trace_id` is required), so it is the only case
+     * that is dropped, and it is logged rather than discarded silently.
+     *
      * @param  array<string, mixed>  $data
      */
     private function storeQuery(Project $project, array $data): void
@@ -85,6 +105,8 @@ class EventStore
         $trace = $this->resolveTrace($project, $data);
 
         if (! $trace) {
+            Log::warning('Dropped a query record that carries no correlation id.', ['project_id' => $project->id]);
+
             return;
         }
 
@@ -263,6 +285,13 @@ class EventStore
     }
 
     /**
+     * Find the project's trace for a child record, creating a stub when the request record has not been ingested yet.
+     *
+     * Records are processed by independent queue jobs, so a child can arrive before its request. The stub is
+     * flagged `is_stub` and carries placeholder request fields until `storeRequest` fills it in. Creation goes
+     * through `firstOrCreate`, which catches the unique violation on (project_id, correlation_id) raised when a
+     * concurrent job creates the same stub first and returns that row instead.
+     *
      * @param  array<string, mixed>  $data
      */
     private function resolveTrace(Project $project, array $data): ?Trace
@@ -273,9 +302,15 @@ class EventStore
             return null;
         }
 
-        return Trace::where('project_id', $project->id)
-            ->where('correlation_id', (string) $correlationId)
-            ->first();
+        return Trace::firstOrCreate(
+            ['project_id' => $project->id, 'correlation_id' => (string) $correlationId],
+            fn (): array => [
+                'method' => '',
+                'uri' => '',
+                'is_stub' => true,
+                'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+            ],
+        );
     }
 
     private function detectQueryType(string $sql): ?string

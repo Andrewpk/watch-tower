@@ -170,6 +170,7 @@ class RequestStats
     public function topUsers(Project $project, TimeRange $range, int $limit = 30): array
     {
         return Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->whereNotNull('user_identifier')
@@ -192,6 +193,7 @@ class RequestStats
     private function baseQuery(Project $project, TimeRange $range, ?string $userId): Builder
     {
         $query = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereBetween('occurred_at', [$range->from, $range->to]);
 
