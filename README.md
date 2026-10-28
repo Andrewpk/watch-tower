@@ -40,6 +40,7 @@ There are two pieces to install — the Watch Tower server, and the Nightwatch c
 
 - **[Install Watch Tower (server)](doc/install.md)** — full setup guide: requirements, environment, database, dev server, scripts, testing, and troubleshooting.
 - **[Install the client app integration](doc/install-client.md)** — wire up `laravel/nightwatch` in your client Laravel app and point it at your Watch Tower instance.
+- **[Run with Docker](doc/docker.md)** — pull the release image from GHCR and run the web server, queue worker, and scheduler.
 
 ### Quick start
 
