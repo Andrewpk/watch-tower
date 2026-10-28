@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\DeleteProjectData;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
@@ -119,6 +120,14 @@ class ProjectAdminController extends Controller
         return redirect()->route('settings.projects.index')->with('success', 'Project updated.');
     }
 
+    /**
+     * Delete a project.
+     *
+     * The project is hidden from everyone straight away (admins detached,
+     * `deleting_at` set, which drops it from the default `Project` scope and so
+     * from lists, URLs and ingest). Its telemetry is then deleted in chunks
+     * by a queued job, which finally removes the row.
+     */
     public function destroy(Request $request, Project $project): RedirectResponse
     {
         $confirmation = $request->input('confirmation');
@@ -131,8 +140,10 @@ class ProjectAdminController extends Controller
 
         DB::transaction(function () use ($project) {
             $project->admins()->detach();
-            $project->delete();
+            $project->forceFill(['deleting_at' => now()])->save();
         });
+
+        DeleteProjectData::dispatch($project->id);
 
         return redirect()->route('settings.projects.index')->with('success', "Project '{$project->name}' and all its data have been deleted.");
     }

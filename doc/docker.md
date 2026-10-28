@@ -58,6 +58,8 @@ docker run -d --name watch-tower-scheduler --no-healthcheck \
   ghcr.io/andrewpk/watch-tower:1.2.3 php artisan schedule:work
 ```
 
+The scheduler also applies each project's retention (`watch:prune` runs daily), so keep it running or old telemetry is never deleted.
+
 SQLite works for a single host. Containers on different hosts need MySQL.
 
 ## Notes
