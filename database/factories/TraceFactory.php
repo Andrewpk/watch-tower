@@ -29,6 +29,7 @@ class TraceFactory extends Factory
             'hostname' => fake()->domainWord(),
             'has_errors' => false,
             'has_slow_queries' => false,
+            'is_stub' => false,
             'occurred_at' => now(),
         ];
     }

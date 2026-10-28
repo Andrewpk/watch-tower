@@ -39,6 +39,7 @@ class DashboardStats
     private function activity(Project $project, TimeRange $range): array
     {
         $traces = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->orderBy('occurred_at');
@@ -89,6 +90,7 @@ class DashboardStats
         $bucketSeconds = max(1, intdiv($totalSeconds, $bucketCount));
 
         $rows = Trace::query()
+            ->excludingStubs()
             ->where('project_id', $project->id)
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->orderBy('occurred_at')
