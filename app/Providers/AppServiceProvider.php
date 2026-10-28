@@ -2,17 +2,12 @@
 
 namespace App\Providers;
 
-use App\Http\Middleware\AuthenticateIngestRequest;
-use App\Http\Middleware\AuthenticateNightwatchIngest;
 use App\Models\Project;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Contracts\Http\Kernel as HttpKernel;
-use Illuminate\Foundation\Http\Kernel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Routing\Middleware\ThrottleRequests;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -45,8 +40,6 @@ class AppServiceProvider extends ServiceProvider
      */
     protected function configureRateLimiting(): void
     {
-        $this->runIngestAuthBeforeThrottling();
-
         RateLimiter::for('ingest', function (Request $request): Limit {
             $project = $request->attributes->get('watch_project');
 
@@ -60,25 +53,6 @@ class AppServiceProvider extends ServiceProvider
             (int) config('watch.ingest.agent_auth_per_minute'),
             'ip:'.$request->ip(),
         ));
-    }
-
-    /**
-     * Keep the ingest auth middleware ahead of the throttle middleware.
-     *
-     * Route middleware is re-sorted by the router's priority list, which puts
-     * ThrottleRequests ahead of the api group's SubstituteBindings, and that
-     * group middleware sits ahead of our auth middleware, so listing auth
-     * first on the route is not enough. Giving the auth middleware a priority
-     * slot before ThrottleRequests pins the order.
-     */
-    protected function runIngestAuthBeforeThrottling(): void
-    {
-        /** @var Kernel $kernel */
-        $kernel = $this->app->make(HttpKernel::class);
-
-        foreach ([AuthenticateIngestRequest::class, AuthenticateNightwatchIngest::class] as $authMiddleware) {
-            $kernel->addToMiddlewarePriorityBefore(ThrottleRequests::class, $authMiddleware);
-        }
     }
 
     /**
