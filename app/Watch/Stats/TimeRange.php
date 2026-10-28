@@ -13,7 +13,7 @@ final class TimeRange
     ) {}
 
     /**
-     * Build a TimeRange from a short label like "1h", "24h", "7d", "14d", "30d".
+     * Build a TimeRange from a short label like "15m", "1h", "24h", "7d", "14d", "30d".
      * Falls back to 1h if the label isn't recognised.
      */
     public static function fromLabel(string $label): self
@@ -22,6 +22,7 @@ final class TimeRange
         $now = CarbonImmutable::now();
 
         $map = [
+            '15m' => $now->subMinutes(15),
             '1h' => $now->subHour(),
             '24h' => $now->subDay(),
             '7d' => $now->subDays(7),
@@ -37,6 +38,7 @@ final class TimeRange
     public function humanLabel(): string
     {
         return match ($this->label) {
+            '15m' => 'the last 15 minutes',
             '1h' => 'the last hour',
             '24h' => 'the last 24 hours',
             '7d' => 'the last 7 days',
