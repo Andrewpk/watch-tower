@@ -1,6 +1,17 @@
 import { usePage } from '@inertiajs/react';
 import { useMemo } from 'react';
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis } from 'recharts';
+import {
+    Bar,
+    BarChart,
+    CartesianGrid,
+    ResponsiveContainer,
+    Scatter,
+    ScatterChart,
+    Tooltip,
+    XAxis,
+    YAxis,
+    ZAxis,
+} from 'recharts';
 
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
@@ -51,14 +62,19 @@ export default function QueryShow({ detail, selectedRange }: Props) {
     const slug = props.currentProject?.slug ?? '';
 
     const condensed = detail.sql.replace(/\s+/g, ' ').trim();
-    const truncated = condensed.length > 280 ? condensed.slice(0, 280).trimEnd() + '…' : condensed;
+    const truncated =
+        condensed.length > 280
+            ? condensed.slice(0, 280).trimEnd() + '…'
+            : condensed;
 
     return (
         <AppLayout title="Query detail">
             <PageHeader
                 title={
                     <span className="flex flex-col gap-1">
-                        <span className="text-xs font-normal tracking-wider text-muted-foreground uppercase">Queries</span>
+                        <span className="text-xs font-normal tracking-wider text-muted-foreground uppercase">
+                            Queries
+                        </span>
                         <span className="block max-w-[920px] font-mono text-base leading-snug font-medium break-words">
                             {truncated}
                         </span>
@@ -96,29 +112,60 @@ function CallsCard({ detail }: { detail: Detail }) {
     return (
         <Card>
             <CardHeader className="pb-3">
-                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">Calls</CardTitle>
+                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                    Calls
+                </CardTitle>
             </CardHeader>
             <Separator />
             <CardContent className="p-5">
-                <div className="text-3xl font-semibold">{formatNumber(detail.totals.total)}</div>
+                <div className="text-3xl font-semibold">
+                    {formatNumber(detail.totals.total)}
+                </div>
                 <div className="mt-5 h-40">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={data}>
-                            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+                            <CartesianGrid
+                                stroke="var(--color-border)"
+                                strokeDasharray="3 3"
+                                vertical={false}
+                            />
                             <XAxis
                                 dataKey="time"
-                                tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }}
-                                interval={Math.max(0, Math.floor(data.length / 6))}
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                interval={Math.max(
+                                    0,
+                                    Math.floor(data.length / 6),
+                                )}
                             />
-                            <YAxis tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }} width={28} />
-                            <Tooltip cursor={{ fill: 'var(--color-muted)' }} contentStyle={tooltipStyle} />
-                            <Bar dataKey="Calls" fill="#94a3b8" radius={[2, 2, 0, 0]} />
+                            <YAxis
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                width={28}
+                            />
+                            <Tooltip
+                                cursor={{ fill: 'var(--color-muted)' }}
+                                contentStyle={tooltipStyle}
+                            />
+                            <Bar
+                                dataKey="Calls"
+                                fill="#94a3b8"
+                                radius={[2, 2, 0, 0]}
+                            />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
                     <span>{formatStamp(detail.buckets[0]?.bucket)}</span>
-                    <span>{formatStamp(detail.buckets[detail.buckets.length - 1]?.bucket)}</span>
+                    <span>
+                        {formatStamp(
+                            detail.buckets[detail.buckets.length - 1]?.bucket,
+                        )}
+                    </span>
                 </div>
             </CardContent>
         </Card>
@@ -129,23 +176,37 @@ function DurationCard({ detail }: { detail: Detail }) {
     const avgData = useMemo(
         () =>
             detail.buckets
-                .map((b) => ({ x: new Date(b.bucket).getTime(), y: b.avg_duration }))
-                .filter((p): p is { x: number; y: number } => p.y !== null && p.y > 0),
+                .map((b) => ({
+                    x: new Date(b.bucket).getTime(),
+                    y: b.avg_duration,
+                }))
+                .filter(
+                    (p): p is { x: number; y: number } =>
+                        p.y !== null && p.y > 0,
+                ),
         [detail.buckets],
     );
 
     const p95Data = useMemo(
         () =>
             detail.buckets
-                .map((b) => ({ x: new Date(b.bucket).getTime(), y: b.p95_duration }))
-                .filter((p): p is { x: number; y: number } => p.y !== null && p.y > 0),
+                .map((b) => ({
+                    x: new Date(b.bucket).getTime(),
+                    y: b.p95_duration,
+                }))
+                .filter(
+                    (p): p is { x: number; y: number } =>
+                        p.y !== null && p.y > 0,
+                ),
         [detail.buckets],
     );
 
     return (
         <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">Duration</CardTitle>
+                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                    Duration
+                </CardTitle>
                 <div className="flex items-center gap-4 text-[10px] tracking-wider text-muted-foreground uppercase">
                     <span className="flex items-center gap-1.5">
                         <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
@@ -163,31 +224,55 @@ function DurationCard({ detail }: { detail: Detail }) {
                     <div>
                         <div className="text-3xl font-semibold">
                             {formatMs(detail.totals.min_ms)}
-                            <span className="px-2 text-base text-muted-foreground">–</span>
+                            <span className="px-2 text-base text-muted-foreground">
+                                –
+                            </span>
                             {formatMs(detail.totals.max_ms)}
                         </div>
-                        <div className="text-[10px] tracking-wider text-muted-foreground uppercase">Min – Max</div>
+                        <div className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                            Min – Max
+                        </div>
                     </div>
                     <Separator orientation="vertical" className="h-10" />
-                    <Stat label="Avg" value={formatMs(detail.totals.avg_ms)} accent="text-foreground" />
-                    <Stat label="P95" value={formatMs(detail.totals.p95_ms)} accent="text-foreground" />
+                    <Stat
+                        label="Avg"
+                        value={formatMs(detail.totals.avg_ms)}
+                        accent="text-foreground"
+                    />
+                    <Stat
+                        label="P95"
+                        value={formatMs(detail.totals.p95_ms)}
+                        accent="text-foreground"
+                    />
                 </div>
 
                 <div className="mt-5 h-40">
                     <ResponsiveContainer width="100%" height="100%">
                         <ScatterChart>
-                            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
+                            <CartesianGrid
+                                stroke="var(--color-border)"
+                                strokeDasharray="3 3"
+                                vertical={false}
+                            />
                             <XAxis
                                 type="number"
                                 dataKey="x"
                                 domain={['dataMin', 'dataMax']}
-                                tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }}
-                                tickFormatter={(value) => formatTime(new Date(value).toISOString())}
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                tickFormatter={(value) =>
+                                    formatTime(new Date(value).toISOString())
+                                }
                             />
                             <YAxis
                                 type="number"
                                 dataKey="y"
-                                tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }}
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
                                 width={36}
                                 unit="ms"
                             />
@@ -195,8 +280,14 @@ function DurationCard({ detail }: { detail: Detail }) {
                             <Tooltip
                                 cursor={{ strokeDasharray: '3 3' }}
                                 contentStyle={tooltipStyle}
-                                formatter={(value: number | string) => `${Number(value).toFixed(2)} ms`}
-                                labelFormatter={(value: number | string) => formatStamp(new Date(Number(value)).toISOString())}
+                                formatter={(value) =>
+                                    `${Number(value).toFixed(2)} ms`
+                                }
+                                labelFormatter={(value) =>
+                                    formatStamp(
+                                        new Date(Number(value)).toISOString(),
+                                    )
+                                }
                             />
                             <Scatter data={avgData} fill="#9ca3af" />
                             <Scatter data={p95Data} fill="#f59e0b" />
@@ -205,7 +296,11 @@ function DurationCard({ detail }: { detail: Detail }) {
                 </div>
                 <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
                     <span>{formatStamp(detail.buckets[0]?.bucket)}</span>
-                    <span>{formatStamp(detail.buckets[detail.buckets.length - 1]?.bucket)}</span>
+                    <span>
+                        {formatStamp(
+                            detail.buckets[detail.buckets.length - 1]?.bucket,
+                        )}
+                    </span>
                 </div>
             </CardContent>
         </Card>
@@ -221,11 +316,29 @@ function InfoCard({ detail }: { detail: Detail }) {
             <Separator />
             <CardContent className="p-5">
                 <dl className="space-y-3 text-sm">
-                    <InfoRow label="Total Time" value={formatMs(detail.totals.total_ms)} />
-                    <InfoRow label="Avg Time" value={formatMs(detail.totals.avg_ms)} />
-                    <InfoRow label="P95" value={formatMs(detail.totals.p95_ms)} />
-                    <InfoRow label="Calls" value={formatNumber(detail.totals.total)} />
-                    {detail.connection ? <InfoRow label="Connection" value={detail.connection} mono /> : null}
+                    <InfoRow
+                        label="Total Time"
+                        value={formatMs(detail.totals.total_ms)}
+                    />
+                    <InfoRow
+                        label="Avg Time"
+                        value={formatMs(detail.totals.avg_ms)}
+                    />
+                    <InfoRow
+                        label="P95"
+                        value={formatMs(detail.totals.p95_ms)}
+                    />
+                    <InfoRow
+                        label="Calls"
+                        value={formatNumber(detail.totals.total)}
+                    />
+                    {detail.connection ? (
+                        <InfoRow
+                            label="Connection"
+                            value={detail.connection}
+                            mono
+                        />
+                    ) : null}
                 </dl>
 
                 {detail.calls.length > 0 ? (
@@ -235,20 +348,33 @@ function InfoCard({ detail }: { detail: Detail }) {
                         </div>
                         <ul className="space-y-1.5 text-xs">
                             {detail.calls.slice(0, 6).map((call) => (
-                                <li key={call.id} className="flex items-center justify-between gap-3 font-mono">
-                                    <span className="text-muted-foreground">{formatStamp(call.occurred_at)}</span>
+                                <li
+                                    key={call.id}
+                                    className="flex items-center justify-between gap-3 font-mono"
+                                >
+                                    <span className="text-muted-foreground">
+                                        {formatStamp(call.occurred_at)}
+                                    </span>
                                     <span className="flex items-center gap-2">
                                         {call.is_slow ? (
-                                            <Badge variant="warning" className="px-1.5 py-0 text-[9px]">
+                                            <Badge
+                                                variant="warning"
+                                                className="px-1.5 py-0 text-[9px]"
+                                            >
                                                 slow
                                             </Badge>
                                         ) : null}
                                         {call.is_n_plus_one ? (
-                                            <Badge variant="destructive" className="px-1.5 py-0 text-[9px]">
+                                            <Badge
+                                                variant="destructive"
+                                                className="px-1.5 py-0 text-[9px]"
+                                            >
                                                 N+1
                                             </Badge>
                                         ) : null}
-                                        <span className="tabular-nums">{formatMs(call.duration_ms)}</span>
+                                        <span className="tabular-nums">
+                                            {formatMs(call.duration_ms)}
+                                        </span>
                                     </span>
                                 </li>
                             ))}
@@ -260,7 +386,13 @@ function InfoCard({ detail }: { detail: Detail }) {
     );
 }
 
-function SqlCard({ sql, connection }: { sql: string; connection: string | null }) {
+function SqlCard({
+    sql,
+    connection,
+}: {
+    sql: string;
+    connection: string | null;
+}) {
     const formatted = useMemo(() => formatSql(sql), [sql]);
 
     return (
@@ -278,8 +410,13 @@ function SqlCard({ sql, connection }: { sql: string; connection: string | null }
                 <pre className="max-h-[460px] overflow-auto bg-muted/30 px-5 py-4 font-mono text-xs leading-relaxed">
                     <code>
                         {formatted.map((line, i) => (
-                            <div key={i} className="grid grid-cols-[28px_1fr] gap-3">
-                                <span className="text-right text-muted-foreground/60 select-none">{i + 1}</span>
+                            <div
+                                key={i}
+                                className="grid grid-cols-[28px_1fr] gap-3"
+                            >
+                                <span className="text-right text-muted-foreground/60 select-none">
+                                    {i + 1}
+                                </span>
                                 <span style={{ paddingLeft: line.indent * 12 }}>
                                     <SqlTokens text={line.text} />
                                 </span>
@@ -293,48 +430,110 @@ function SqlCard({ sql, connection }: { sql: string; connection: string | null }
 }
 
 const SQL_KEYWORDS = new Set([
-    'select', 'from', 'where', 'and', 'or', 'on', 'as', 'in', 'is', 'not', 'null',
-    'inner', 'outer', 'left', 'right', 'join', 'group', 'by', 'order', 'limit', 'offset',
-    'insert', 'into', 'values', 'update', 'set', 'delete', 'returning', 'between',
-    'like', 'asc', 'desc', 'count', 'sum', 'avg', 'min', 'max', 'distinct',
-    'having', 'union', 'all', 'case', 'when', 'then', 'else', 'end',
+    'select',
+    'from',
+    'where',
+    'and',
+    'or',
+    'on',
+    'as',
+    'in',
+    'is',
+    'not',
+    'null',
+    'inner',
+    'outer',
+    'left',
+    'right',
+    'join',
+    'group',
+    'by',
+    'order',
+    'limit',
+    'offset',
+    'insert',
+    'into',
+    'values',
+    'update',
+    'set',
+    'delete',
+    'returning',
+    'between',
+    'like',
+    'asc',
+    'desc',
+    'count',
+    'sum',
+    'avg',
+    'min',
+    'max',
+    'distinct',
+    'having',
+    'union',
+    'all',
+    'case',
+    'when',
+    'then',
+    'else',
+    'end',
 ]);
 
 function SqlTokens({ text }: { text: string }) {
     const tokens = text.split(/(\s+|`[^`]+`|'[^']*'|\?|\(|\)|,)/g);
+
     return (
         <>
             {tokens.map((tok, i) => {
-                if (tok === '' || tok === undefined) return null;
+                if (tok === '' || tok === undefined) {
+                    return null;
+                }
+
                 const lower = tok.toLowerCase();
+
                 if (SQL_KEYWORDS.has(lower)) {
                     return (
-                        <span key={i} className="text-sky-600 dark:text-sky-400">
+                        <span
+                            key={i}
+                            className="text-sky-600 dark:text-sky-400"
+                        >
                             {tok}
                         </span>
                     );
                 }
+
                 if (tok.startsWith('`') && tok.endsWith('`')) {
                     return (
-                        <span key={i} className="text-amber-600 dark:text-amber-400">
+                        <span
+                            key={i}
+                            className="text-amber-600 dark:text-amber-400"
+                        >
                             {tok}
                         </span>
                     );
                 }
+
                 if (tok === '?' || /^[0-9]+$/.test(tok)) {
                     return (
-                        <span key={i} className="text-rose-500 dark:text-rose-400">
+                        <span
+                            key={i}
+                            className="text-rose-500 dark:text-rose-400"
+                        >
                             {tok}
                         </span>
                     );
                 }
+
                 if (tok.startsWith("'") && tok.endsWith("'")) {
                     return (
-                        <span key={i} className="text-emerald-600 dark:text-emerald-400">
+                        <span
+                            key={i}
+                            className="text-emerald-600 dark:text-emerald-400"
+                        >
                             {tok}
                         </span>
                     );
                 }
+
                 return <span key={i}>{tok}</span>;
             })}
         </>
@@ -345,60 +544,107 @@ type FormattedLine = { text: string; indent: number };
 
 function formatSql(sql: string): FormattedLine[] {
     const condensed = sql.replace(/\s+/g, ' ').trim();
-    const breakAt = /\b(select|from|where|and|or|inner join|left join|right join|outer join|join|group by|order by|having|limit|offset|union|values|set|insert into|update|delete from|returning|on)\b/gi;
+    const breakAt =
+        /\b(select|from|where|and|or|inner join|left join|right join|outer join|join|group by|order by|having|limit|offset|union|values|set|insert into|update|delete from|returning|on)\b/gi;
 
     const lines: string[] = [];
     let buffer = '';
 
     for (const part of condensed.split(breakAt)) {
-        if (part === undefined) continue;
+        if (part === undefined) {
+            continue;
+        }
+
         const trimmed = part.trim();
-        if (trimmed === '') continue;
-        if (breakAt.test(trimmed) || /^(select|from|where|and|or|inner join|left join|right join|outer join|join|group by|order by|having|limit|offset|union|values|set|insert into|update|delete from|returning|on)$/i.test(trimmed)) {
+
+        if (trimmed === '') {
+            continue;
+        }
+
+        if (
+            breakAt.test(trimmed) ||
+            /^(select|from|where|and|or|inner join|left join|right join|outer join|join|group by|order by|having|limit|offset|union|values|set|insert into|update|delete from|returning|on)$/i.test(
+                trimmed,
+            )
+        ) {
             if (buffer.trim() !== '') {
                 lines.push(buffer.trim());
             }
+
             buffer = trimmed;
         } else {
             buffer = buffer === '' ? trimmed : `${buffer} ${trimmed}`;
         }
     }
+
     if (buffer.trim() !== '') {
         lines.push(buffer.trim());
     }
 
     let indent = 0;
+
     return lines.map((line) => {
         const lower = line.toLowerCase();
         let useIndent = indent;
+
         if (/^(and|or|on)\b/.test(lower)) {
             useIndent = Math.max(1, indent);
         }
+
         if (/^\(/.test(line)) {
             indent++;
         }
+
         if (/^\)/.test(line)) {
             indent = Math.max(0, indent - 1);
             useIndent = indent;
         }
+
         return { text: line, indent: useIndent };
     });
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent: string }) {
+function Stat({
+    label,
+    value,
+    accent,
+}: {
+    label: string;
+    value: string;
+    accent: string;
+}) {
     return (
         <div>
-            <div className="text-[10px] tracking-wider text-muted-foreground uppercase">{label}</div>
+            <div className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                {label}
+            </div>
             <div className={cn('text-base font-semibold', accent)}>{value}</div>
         </div>
     );
 }
 
-function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function InfoRow({
+    label,
+    value,
+    mono,
+}: {
+    label: string;
+    value: string;
+    mono?: boolean;
+}) {
     return (
         <div className="flex items-center justify-between border-b border-dashed border-border/60 pb-2 last:border-b-0 last:pb-0">
-            <dt className="text-[11px] tracking-wider text-muted-foreground uppercase">{label}</dt>
-            <dd className={cn('font-medium text-foreground tabular-nums', mono && 'font-mono text-xs')}>{value}</dd>
+            <dt className="text-[11px] tracking-wider text-muted-foreground uppercase">
+                {label}
+            </dt>
+            <dd
+                className={cn(
+                    'font-medium text-foreground tabular-nums',
+                    mono && 'font-mono text-xs',
+                )}
+            >
+                {value}
+            </dd>
         </div>
     );
 }
@@ -411,22 +657,32 @@ function formatMs(value: number | null): string {
     if (value === null || Number.isNaN(value)) {
         return '—';
     }
+
     if (value < 1) {
         return `${Math.round(value * 1000)}µs`;
     }
+
     if (value >= 1000) {
         return `${(value / 1000).toFixed(2)}s`;
     }
+
     return `${value.toFixed(2)}ms`;
 }
 
 function formatTime(iso: string): string {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 function formatStamp(iso: string | null | undefined): string {
-    if (!iso) return '';
+    if (!iso) {
+        return '';
+    }
+
     const d = new Date(iso);
+
     return d.toLocaleString([], {
         month: 'short',
         day: 'numeric',

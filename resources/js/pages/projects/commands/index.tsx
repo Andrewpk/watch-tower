@@ -1,15 +1,45 @@
 import { Link, router } from '@inertiajs/react';
-import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink, Search, Users } from 'lucide-react';
+import {
+    ArrowDown,
+    ArrowUp,
+    ArrowUpDown,
+    ExternalLink,
+    Search,
+    Users,
+} from 'lucide-react';
 import { useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import {
+    Bar,
+    BarChart,
+    CartesianGrid,
+    Line,
+    LineChart,
+    ResponsiveContainer,
+    Tooltip,
+    XAxis,
+    YAxis,
+} from 'recharts';
 
 import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
 import { AppLayout } from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import commandsRoutes from '@/routes/projects/commands';
@@ -51,16 +81,28 @@ type Props = {
     filters: { search: string | null; sort: SortKey; dir: SortDir };
 };
 
-type SortKey = 'command' | 'successful' | 'failed' | 'total' | 'avg_ms' | 'p95_ms';
+type SortKey =
+    | 'command'
+    | 'successful'
+    | 'failed'
+    | 'total'
+    | 'avg_ms'
+    | 'p95_ms';
 type SortDir = 'asc' | 'desc';
 
-export default function CommandsIndex({ summary, commands, selectedRange, filters }: Props) {
+export default function CommandsIndex({
+    summary,
+    commands,
+    selectedRange,
+    filters,
+}: Props) {
     const [search, setSearch] = useState(filters.search ?? '');
     const sortKey = filters.sort;
     const sortDir = filters.dir;
 
     const visit = (params: Record<string, string | number | null>) => {
         const url = new URL(window.location.href);
+
         for (const [key, value] of Object.entries(params)) {
             if (value === null || value === '') {
                 url.searchParams.delete(key);
@@ -68,11 +110,22 @@ export default function CommandsIndex({ summary, commands, selectedRange, filter
                 url.searchParams.set(key, String(value));
             }
         }
-        router.visit(url.pathname + url.search, { preserveScroll: true, preserveState: true });
+
+        router.visit(url.pathname + url.search, {
+            preserveScroll: true,
+            preserveState: true,
+        });
     };
 
     const toggleSort = (key: SortKey) => {
-        const nextDir: SortDir = sortKey === key ? (sortDir === 'asc' ? 'desc' : 'asc') : key === 'command' ? 'asc' : 'desc';
+        const nextDir: SortDir =
+            sortKey === key
+                ? sortDir === 'asc'
+                    ? 'desc'
+                    : 'asc'
+                : key === 'command'
+                  ? 'asc'
+                  : 'desc';
         visit({ sort: key, dir: nextDir, page: null });
     };
 
@@ -110,9 +163,14 @@ export default function CommandsIndex({ summary, commands, selectedRange, filter
 
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                        <CardTitle>{commands.total.toLocaleString()} Commands</CardTitle>
-                        <form onSubmit={onSearchSubmit} className="relative w-64">
-                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <CardTitle>
+                            {commands.total.toLocaleString()} Commands
+                        </CardTitle>
+                        <form
+                            onSubmit={onSearchSubmit}
+                            className="relative w-64"
+                        >
+                            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                             <Input
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
@@ -126,28 +184,88 @@ export default function CommandsIndex({ summary, commands, selectedRange, filter
                         <Table>
                             <TableHeader>
                                 <TableRow>
-                                    <SortableHead label="COMMAND" sortKey="command" current={sortKey} dir={sortDir} onSort={toggleSort} />
-                                    <SortableHead label="SUCCESS" sortKey="successful" current={sortKey} dir={sortDir} onSort={toggleSort} align="right" className="w-28" />
-                                    <SortableHead label="FAILED" sortKey="failed" current={sortKey} dir={sortDir} onSort={toggleSort} align="right" className="w-24" />
-                                    <SortableHead label="TOTAL" sortKey="total" current={sortKey} dir={sortDir} onSort={toggleSort} align="right" className="w-24" />
-                                    <SortableHead label="AVG" sortKey="avg_ms" current={sortKey} dir={sortDir} onSort={toggleSort} align="right" className="w-24" />
-                                    <SortableHead label="P95" sortKey="p95_ms" current={sortKey} dir={sortDir} onSort={toggleSort} align="right" className="w-24" />
+                                    <SortableHead
+                                        label="COMMAND"
+                                        sortKey="command"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                    />
+                                    <SortableHead
+                                        label="SUCCESS"
+                                        sortKey="successful"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                        align="right"
+                                        className="w-28"
+                                    />
+                                    <SortableHead
+                                        label="FAILED"
+                                        sortKey="failed"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                        align="right"
+                                        className="w-24"
+                                    />
+                                    <SortableHead
+                                        label="TOTAL"
+                                        sortKey="total"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                        align="right"
+                                        className="w-24"
+                                    />
+                                    <SortableHead
+                                        label="AVG"
+                                        sortKey="avg_ms"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                        align="right"
+                                        className="w-24"
+                                    />
+                                    <SortableHead
+                                        label="P95"
+                                        sortKey="p95_ms"
+                                        current={sortKey}
+                                        dir={sortDir}
+                                        onSort={toggleSort}
+                                        align="right"
+                                        className="w-24"
+                                    />
                                     <TableHead className="w-10" />
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {commands.data.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={7} className="py-10 text-center text-sm text-muted-foreground">
-                                            No commands captured in {selectedRange.toUpperCase()}
+                                        <TableCell
+                                            colSpan={7}
+                                            className="py-10 text-center text-sm text-muted-foreground"
+                                        >
+                                            No commands captured in{' '}
+                                            {selectedRange.toUpperCase()}
                                         </TableCell>
                                     </TableRow>
                                 ) : (
-                                    commands.data.map((row) => <CommandRowTr key={row.command} row={row} />)
+                                    commands.data.map((row) => (
+                                        <CommandRowTr
+                                            key={row.command}
+                                            row={row}
+                                        />
+                                    ))
                                 )}
                             </TableBody>
                         </Table>
-                        <Pagination links={commands.links} from={commands.from} to={commands.to} total={commands.total} />
+                        <Pagination
+                            links={commands.links}
+                            from={commands.from}
+                            to={commands.to}
+                            total={commands.total}
+                        />
                     </CardContent>
                 </Card>
             </div>
@@ -156,14 +274,25 @@ export default function CommandsIndex({ summary, commands, selectedRange, filter
 }
 
 function CommandRowTr({ row }: { row: CommandRow }) {
-    const slug = (typeof window !== 'undefined' ? window.location.pathname.split('/')[2] : '') || '';
-    const href = commandsRoutes.show({ project: slug, command: row.command }).url;
+    const slug =
+        (typeof window !== 'undefined'
+            ? window.location.pathname.split('/')[2]
+            : '') || '';
+    const href = commandsRoutes.show({
+        project: slug,
+        command: row.command,
+    }).url;
 
     return (
         <TableRow className="cursor-pointer hover:bg-muted/50">
             <TableCell className="py-2.5">
-                <Link href={href} className="flex items-center gap-2 font-mono text-xs hover:text-foreground">
-                    <span className="grid h-5 w-5 place-items-center rounded bg-muted text-[10px] text-muted-foreground">$</span>
+                <Link
+                    href={href}
+                    className="flex items-center gap-2 font-mono text-xs hover:text-foreground"
+                >
+                    <span className="grid h-5 w-5 place-items-center rounded bg-muted text-[10px] text-muted-foreground">
+                        $
+                    </span>
                     {row.command}
                 </Link>
             </TableCell>
@@ -173,7 +302,10 @@ function CommandRowTr({ row }: { row: CommandRow }) {
             <Numeric value={formatMs(row.avg_ms)} muted raw />
             <Numeric value={formatMs(row.p95_ms)} muted raw />
             <TableCell className="py-2.5 text-right">
-                <Link href={href} className="inline-flex text-muted-foreground hover:text-foreground">
+                <Link
+                    href={href}
+                    className="inline-flex text-muted-foreground hover:text-foreground"
+                >
                     <ExternalLink className="h-3.5 w-3.5" />
                 </Link>
             </TableCell>
@@ -181,9 +313,31 @@ function CommandRowTr({ row }: { row: CommandRow }) {
     );
 }
 
-function Numeric({ value, muted, raw }: { value: number | string; muted?: boolean; raw?: boolean }) {
-    const text = raw ? String(value) : typeof value === 'number' ? formatNumber(value) : value;
-    return <TableCell className={cn('py-2.5 text-right font-mono text-xs', muted && 'text-muted-foreground')}>{text}</TableCell>;
+function Numeric({
+    value,
+    muted,
+    raw,
+}: {
+    value: number | string;
+    muted?: boolean;
+    raw?: boolean;
+}) {
+    const text = raw
+        ? String(value)
+        : typeof value === 'number'
+          ? formatNumber(value)
+          : value;
+
+    return (
+        <TableCell
+            className={cn(
+                'py-2.5 text-right font-mono text-xs',
+                muted && 'text-muted-foreground',
+            )}
+        >
+            {text}
+        </TableCell>
+    );
 }
 
 function CallsCard({ summary }: { summary: Summary }) {
@@ -197,29 +351,77 @@ function CallsCard({ summary }: { summary: Summary }) {
     return (
         <Card>
             <CardHeader className="pb-3">
-                <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">Calls</CardTitle>
+                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                    Calls
+                </CardTitle>
             </CardHeader>
             <Separator />
             <CardContent className="p-5">
                 <div className="flex items-baseline gap-6">
                     <div>
-                        <div className="text-3xl font-semibold">{formatNumber(totals.total)}</div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Calls</div>
+                        <div className="text-3xl font-semibold">
+                            {formatNumber(totals.total)}
+                        </div>
+                        <div className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                            Calls
+                        </div>
                     </div>
                     <Separator orientation="vertical" className="h-10" />
-                    <Stat label="Failed" value={formatNumber(totals.failed)} accent="text-rose-600 dark:text-rose-400" dot="bg-rose-500" />
-                    <Stat label="Successful" value={formatNumber(totals.successful)} accent="text-emerald-600 dark:text-emerald-400" dot="bg-emerald-500" />
+                    <Stat
+                        label="Failed"
+                        value={formatNumber(totals.failed)}
+                        accent="text-rose-600 dark:text-rose-400"
+                        dot="bg-rose-500"
+                    />
+                    <Stat
+                        label="Successful"
+                        value={formatNumber(totals.successful)}
+                        accent="text-emerald-600 dark:text-emerald-400"
+                        dot="bg-emerald-500"
+                    />
                 </div>
 
                 <div className="mt-5 h-40">
                     <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={data}>
-                            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }} interval={Math.max(0, Math.floor(data.length / 6))} />
-                            <YAxis tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }} width={28} />
-                            <Tooltip cursor={{ fill: 'var(--color-muted)' }} contentStyle={tooltipStyle} />
-                            <Bar dataKey="Successful" stackId="s" fill="#10b981" />
-                            <Bar dataKey="Failed" stackId="s" fill="#ef4444" radius={[2, 2, 0, 0]} />
+                            <CartesianGrid
+                                stroke="var(--color-border)"
+                                strokeDasharray="3 3"
+                                vertical={false}
+                            />
+                            <XAxis
+                                dataKey="time"
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                interval={Math.max(
+                                    0,
+                                    Math.floor(data.length / 6),
+                                )}
+                            />
+                            <YAxis
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                width={28}
+                            />
+                            <Tooltip
+                                cursor={{ fill: 'var(--color-muted)' }}
+                                contentStyle={tooltipStyle}
+                            />
+                            <Bar
+                                dataKey="Successful"
+                                stackId="s"
+                                fill="#10b981"
+                            />
+                            <Bar
+                                dataKey="Failed"
+                                stackId="s"
+                                fill="#ef4444"
+                                radius={[2, 2, 0, 0]}
+                            />
                         </BarChart>
                     </ResponsiveContainer>
                 </div>
@@ -239,7 +441,9 @@ function DurationCard({ summary }: { summary: Summary }) {
     return (
         <Card>
             <CardHeader className="pb-3">
-                <CardTitle className="text-xs uppercase tracking-wider text-muted-foreground">Duration</CardTitle>
+                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                    Duration
+                </CardTitle>
             </CardHeader>
             <Separator />
             <CardContent className="p-5">
@@ -247,25 +451,78 @@ function DurationCard({ summary }: { summary: Summary }) {
                     <div>
                         <div className="text-3xl font-semibold">
                             {formatMs(duration.min_ms)}
-                            <span className="px-2 text-base text-muted-foreground">–</span>
+                            <span className="px-2 text-base text-muted-foreground">
+                                –
+                            </span>
                             {formatMs(duration.max_ms)}
                         </div>
-                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Min – Max</div>
+                        <div className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                            Min – Max
+                        </div>
                     </div>
                     <Separator orientation="vertical" className="h-10" />
-                    <Stat label="Avg" value={formatMs(duration.avg_ms)} accent="text-indigo-600 dark:text-indigo-400" dot="bg-indigo-500" />
-                    <Stat label="P95" value={formatMs(duration.p95_ms)} accent="text-violet-600 dark:text-violet-400" dot="bg-amber-500" />
+                    <Stat
+                        label="Avg"
+                        value={formatMs(duration.avg_ms)}
+                        accent="text-indigo-600 dark:text-indigo-400"
+                        dot="bg-indigo-500"
+                    />
+                    <Stat
+                        label="P95"
+                        value={formatMs(duration.p95_ms)}
+                        accent="text-violet-600 dark:text-violet-400"
+                        dot="bg-amber-500"
+                    />
                 </div>
 
                 <div className="mt-5 h-40">
                     <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data}>
-                            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" vertical={false} />
-                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }} interval={Math.max(0, Math.floor(data.length / 6))} />
-                            <YAxis tick={{ fontSize: 10, fill: 'var(--color-muted-foreground)' }} width={28} unit="ms" />
-                            <Tooltip contentStyle={tooltipStyle} formatter={(value) => `${Number(value).toFixed(0)} ms`} />
-                            <Line type="monotone" dataKey="avg" stroke="#6366f1" strokeWidth={2} dot={{ r: 2, fill: '#6366f1' }} activeDot={{ r: 4 }} />
-                            <Line type="monotone" dataKey="p95" stroke="#f59e0b" strokeWidth={2} dot={{ r: 2, fill: '#f59e0b' }} />
+                            <CartesianGrid
+                                stroke="var(--color-border)"
+                                strokeDasharray="3 3"
+                                vertical={false}
+                            />
+                            <XAxis
+                                dataKey="time"
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                interval={Math.max(
+                                    0,
+                                    Math.floor(data.length / 6),
+                                )}
+                            />
+                            <YAxis
+                                tick={{
+                                    fontSize: 10,
+                                    fill: 'var(--color-muted-foreground)',
+                                }}
+                                width={28}
+                                unit="ms"
+                            />
+                            <Tooltip
+                                contentStyle={tooltipStyle}
+                                formatter={(value) =>
+                                    `${Number(value).toFixed(0)} ms`
+                                }
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="avg"
+                                stroke="#6366f1"
+                                strokeWidth={2}
+                                dot={{ r: 2, fill: '#6366f1' }}
+                                activeDot={{ r: 4 }}
+                            />
+                            <Line
+                                type="monotone"
+                                dataKey="p95"
+                                stroke="#f59e0b"
+                                strokeWidth={2}
+                                dot={{ r: 2, fill: '#f59e0b' }}
+                            />
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
@@ -293,15 +550,18 @@ function SortableHead({
 }) {
     const isActive = current === sortKey;
     const Icon = !isActive ? ArrowUpDown : dir === 'asc' ? ArrowUp : ArrowDown;
+
     return (
         <TableHead className={cn(align === 'right' && 'text-right', className)}>
             <button
                 type="button"
                 onClick={() => onSort(sortKey)}
                 className={cn(
-                    'inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider',
+                    'inline-flex items-center gap-1 text-[10px] font-semibold tracking-wider uppercase',
                     align === 'right' && 'flex-row-reverse',
-                    isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground',
+                    isActive
+                        ? 'text-foreground'
+                        : 'text-muted-foreground hover:text-foreground',
                 )}
             >
                 {label}
@@ -311,11 +571,23 @@ function SortableHead({
     );
 }
 
-function Stat({ label, value, accent, dot }: { label: string; value: string; accent: string; dot?: string }) {
+function Stat({
+    label,
+    value,
+    accent,
+    dot,
+}: {
+    label: string;
+    value: string;
+    accent: string;
+    dot?: string;
+}) {
     return (
         <div>
-            <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                {dot ? <span className={cn('h-1.5 w-1.5 rounded-full', dot)} /> : null}
+            <div className="flex items-center gap-1.5 text-[10px] tracking-wider text-muted-foreground uppercase">
+                {dot ? (
+                    <span className={cn('h-1.5 w-1.5 rounded-full', dot)} />
+                ) : null}
                 {label}
             </div>
             <div className={cn('text-base font-semibold', accent)}>{value}</div>
@@ -331,14 +603,19 @@ function formatMs(value: number | null): string {
     if (value === null || Number.isNaN(value)) {
         return '—';
     }
+
     if (value >= 1000) {
         return `${(value / 1000).toFixed(2)} s`;
     }
+
     return `${Math.round(value)} ms`;
 }
 
 function formatTime(iso: string): string {
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return new Date(iso).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 }
 
 const tooltipStyle = {

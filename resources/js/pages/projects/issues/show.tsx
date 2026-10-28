@@ -20,13 +20,19 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AppLayout } from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
-import comments from '@/routes/projects/issues/comments';
 import issues from '@/routes/projects/issues';
+import comments from '@/routes/projects/issues/comments';
 import type { SharedProps } from '@/types/inertia';
 
 type StackFrame = {
@@ -105,9 +111,13 @@ export default function IssueShow({ issue, assignableUsers }: Props) {
     const { props } = usePage<SharedProps>();
     const slug = props.currentProject?.slug ?? '';
     const currentUserId = props.auth?.user?.id ?? null;
-    const isSubscribed = currentUserId !== null && issue.subscriber_ids.includes(Number(currentUserId));
+    const isSubscribed =
+        currentUserId !== null &&
+        issue.subscriber_ids.includes(Number(currentUserId));
 
-    const update = (payload: Record<string, string | number | boolean | null>) => {
+    const update = (
+        payload: Record<string, string | number | boolean | null>,
+    ) => {
         router.patch(issues.update([slug, issue.display_number]).url, payload, {
             preserveScroll: true,
             preserveState: true,
@@ -120,12 +130,18 @@ export default function IssueShow({ issue, assignableUsers }: Props) {
         <AppLayout title={`#${issue.display_number} ${issue.short_class}`}>
             <PageHeader
                 title={
-                    <span className="block max-w-5xl text-2xl font-semibold leading-tight">
+                    <span className="block max-w-5xl text-2xl leading-tight font-semibold">
                         {issue.exception_class}: {issue.first_message}
                     </span>
                 }
                 breadcrumbs={[
-                    { label: statusLabel, href: issues.index({ project: slug }, { query: { status: 'open' } }).url },
+                    {
+                        label: statusLabel,
+                        href: issues.index(
+                            { project: slug },
+                            { query: { status: 'open' } },
+                        ).url,
+                    },
                     { label: String(issue.display_number) },
                 ]}
             />
@@ -151,7 +167,9 @@ export default function IssueShow({ issue, assignableUsers }: Props) {
                         assignableUsers={assignableUsers}
                         onStatus={(status) => update({ status })}
                         onPriority={(priority) => update({ priority })}
-                        onAssignee={(assigned_to_user_id) => update({ assigned_to_user_id })}
+                        onAssignee={(assigned_to_user_id) =>
+                            update({ assigned_to_user_id })
+                        }
                     />
                     <DetailsPanel issue={issue} />
                     <OccurrencesPanel issue={issue} />
@@ -160,41 +178,68 @@ export default function IssueShow({ issue, assignableUsers }: Props) {
                         className="w-full justify-start gap-2"
                         onClick={() => update({ subscribe: !isSubscribed })}
                     >
-                        {isSubscribed ? <BellOff className="h-4 w-4" /> : <Bell className="h-4 w-4" />}
+                        {isSubscribed ? (
+                            <BellOff className="h-4 w-4" />
+                        ) : (
+                            <Bell className="h-4 w-4" />
+                        )}
                         {isSubscribed ? 'Unsubscribe' : 'Subscribe'}
                     </Button>
-                    <LinearButton issue={issue} onSave={(url) => update({ linear_issue_url: url })} />
+                    <LinearButton
+                        issue={issue}
+                        onSave={(url) => update({ linear_issue_url: url })}
+                    />
                 </aside>
             </div>
         </AppLayout>
     );
 }
 
-function DescriptionEditor({ description, onSave }: { description: string | null; onSave: (value: string) => void }) {
+function DescriptionEditor({
+    description,
+    onSave,
+}: {
+    description: string | null;
+    onSave: (value: string) => void;
+}) {
     const [mode, setMode] = useState<'write' | 'preview'>('write');
     const [value, setValue] = useState(description ?? '');
 
     const dirty = (description ?? '') !== value;
 
     const handleSave = () => {
-        if (!dirty) return;
+        if (!dirty) {
+            return;
+        }
+
         onSave(value);
     };
 
     const handleGenerate = () => {
-        setValue('## Summary\n\nDescribe the issue, its impact, and the next steps.\n');
+        setValue(
+            '## Summary\n\nDescribe the issue, its impact, and the next steps.\n',
+        );
         setMode('write');
     };
 
     return (
         <Card className="overflow-hidden p-0">
             <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                <Tabs value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
+                <Tabs
+                    value={mode}
+                    onValueChange={(value) => setMode(value as typeof mode)}
+                >
                     <TabsList className="h-7 bg-transparent p-0">
-                        <TabsTrigger value="write" className="px-3 text-xs data-[state=active]:bg-muted">
+                        <TabsTrigger
+                            value="write"
+                            className="px-3 text-xs data-[state=active]:bg-muted"
+                        >
                             Write
                         </TabsTrigger>
-                        <TabsTrigger value="preview" className="px-3 text-xs data-[state=active]:bg-muted">
+                        <TabsTrigger
+                            value="preview"
+                            className="px-3 text-xs data-[state=active]:bg-muted"
+                        >
                             Preview
                         </TabsTrigger>
                     </TabsList>
@@ -227,11 +272,17 @@ function DescriptionEditor({ description, onSave }: { description: string | null
 
 function PreviewMarkdown({ value }: { value: string }) {
     if (value.trim() === '') {
-        return <p className="text-xs text-muted-foreground">Nothing to preview yet.</p>;
+        return (
+            <p className="text-xs text-muted-foreground">
+                Nothing to preview yet.
+            </p>
+        );
     }
 
     return (
-        <div className="space-y-3 text-sm whitespace-pre-wrap text-foreground">{value}</div>
+        <div className="space-y-3 text-sm whitespace-pre-wrap text-foreground">
+            {value}
+        </div>
     );
 }
 
@@ -240,7 +291,6 @@ function StacktraceCard({ issue }: { issue: Issue }) {
     const groups = groupFrames(frames);
     const [copied, setCopied] = useState(false);
 
-    
     const copyMarkdown = async () => {
         const md = [
             `**${issue.short_class}**`,
@@ -248,7 +298,12 @@ function StacktraceCard({ issue }: { issue: Issue }) {
             issue.first_message,
             '',
             '```',
-            ...frames.slice(0, 10).map((f) => `${f.file} — ${f.source} : ${f.code ? Object.values(f.code).join('\n') : 'No code snippet available'}`),
+            ...frames
+                .slice(0, 10)
+                .map(
+                    (f) =>
+                        `${f.file} — ${f.source} : ${f.code ? Object.values(f.code).join('\n') : 'No code snippet available'}`,
+                ),
             '```',
         ].join('\n');
 
@@ -257,7 +312,7 @@ function StacktraceCard({ issue }: { issue: Issue }) {
                 await navigator.clipboard.writeText(md);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
-            } catch (err) {
+            } catch {
                 fallbackCopy(md);
             }
         } else {
@@ -265,7 +320,7 @@ function StacktraceCard({ issue }: { issue: Issue }) {
         }
     };
 
-    const fallbackCopy = (text) => {
+    const fallbackCopy = (text: string) => {
         const textarea = document.createElement('textarea');
         textarea.value = text;
         textarea.style.position = 'fixed'; // avoid scroll jump
@@ -289,16 +344,35 @@ function StacktraceCard({ issue }: { issue: Issue }) {
             <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
                 <div className="min-w-0 flex-1">
                     <HandledBadge handled={issue.is_handled} />
-                    <h2 className="mt-3 text-lg font-semibold tracking-tight">{issue.exception_class}</h2>
-                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{issue.first_message}</p>
+                    <h2 className="mt-3 text-lg font-semibold tracking-tight">
+                        {issue.exception_class}
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                        {issue.first_message}
+                    </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={copyMarkdown} className="gap-1.5">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={copyMarkdown}
+                        className="gap-1.5"
+                    >
                         <Clipboard className="h-3.5 w-3.5" />
                         {copied ? 'Copied!' : 'Copy as Markdown'}
                     </Button>
-                    {issue.framework_version && <VersionPill label="Laravel" value={issue.framework_version} />}
-                    {issue.language_version && <VersionPill label="PHP" value={issue.language_version} />}
+                    {issue.framework_version && (
+                        <VersionPill
+                            label="Laravel"
+                            value={issue.framework_version}
+                        />
+                    )}
+                    {issue.language_version && (
+                        <VersionPill
+                            label="PHP"
+                            value={issue.language_version}
+                        />
+                    )}
                 </div>
             </div>
 
@@ -310,14 +384,30 @@ function StacktraceCard({ issue }: { issue: Issue }) {
                 <div className="divide-y divide-border">
                     {groups.map((group, i) => {
                         if (group.type === 'frame') {
-                            return <FrameRow key={`frame-${i}`} frame={group.frame} defaultOpen={i === 0} />;
+                            return (
+                                <FrameRow
+                                    key={`frame-${i}`}
+                                    frame={group.frame}
+                                    defaultOpen={i === 0}
+                                />
+                            );
                         }
 
                         if (group.type === 'vendor') {
-                            return <VendorFrames key={`vendor-${i}`} frames={group.frames} />;
+                            return (
+                                <VendorFrames
+                                    key={`vendor-${i}`}
+                                    frames={group.frames}
+                                />
+                            );
                         }
 
-                        return <EntrypointFrame key={`entry-${i}`} frame={group.frame} />;
+                        return (
+                            <EntrypointFrame
+                                key={`entry-${i}`}
+                                frame={group.frame}
+                            />
+                        );
                     })}
                 </div>
             )}
@@ -335,22 +425,27 @@ function groupFrames(frames: StackFrame[]): FrameGroup[] {
     let buffer: StackFrame[] = [];
 
     const flushVendor = (atIndex: number) => {
-        if (buffer.length === 0) return;
+        if (buffer.length === 0) {
+            return;
+        }
+
         groups.push({ type: 'vendor', frames: buffer, index: atIndex });
         buffer = [];
     };
 
     frames = frames || [];
-    
+
     frames.forEach((frame, i) => {
         if (i === frames.length - 1 && isEntrypoint(frame)) {
             flushVendor(i);
             groups.push({ type: 'entry', frame, index: i });
+
             return;
         }
 
         if (isVendor(frame) && !hasCode(frame)) {
             buffer.push(frame);
+
             return;
         }
 
@@ -365,6 +460,7 @@ function groupFrames(frames: StackFrame[]): FrameGroup[] {
 
 function isVendor(frame: StackFrame): boolean {
     const path = parseFile(frame.file).path;
+
     return /^vendor\//.test(path) || /\/vendor\//.test(path);
 }
 
@@ -374,17 +470,34 @@ function hasCode(frame: StackFrame): boolean {
 
 function isEntrypoint(frame: StackFrame): boolean {
     const path = parseFile(frame.file).path;
+
     return /(^|\/)(artisan|public\/index\.php|server\.php)$/.test(path);
 }
 
-function parseFile(file: string | null | undefined): { path: string; line: number | null } {
-    if (!file) return { path: '', line: null };
+function parseFile(file: string | null | undefined): {
+    path: string;
+    line: number | null;
+} {
+    if (!file) {
+        return { path: '', line: null };
+    }
+
     const match = file.match(/^(.*):(\d+)$/);
-    if (match) return { path: match[1], line: Number(match[2]) };
+
+    if (match) {
+        return { path: match[1], line: Number(match[2]) };
+    }
+
     return { path: file, line: null };
 }
 
-function FrameRow({ frame, defaultOpen }: { frame: StackFrame; defaultOpen?: boolean }) {
+function FrameRow({
+    frame,
+    defaultOpen,
+}: {
+    frame: StackFrame;
+    defaultOpen?: boolean;
+}) {
     const [open, setOpen] = useState(!!defaultOpen);
     const { path, line } = parseFile(frame.file);
     const chain = buildChain(frame);
@@ -398,14 +511,29 @@ function FrameRow({ frame, defaultOpen }: { frame: StackFrame; defaultOpen?: boo
                 className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-muted/40"
             >
                 <Circle className="h-2 w-2 shrink-0 fill-muted-foreground/60 text-muted-foreground/60" />
-                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={chain}>
+                <span
+                    className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground"
+                    title={chain}
+                >
                     {chain}
                 </span>
-                <span className="shrink-0 truncate font-mono text-[11px] text-muted-foreground" title={frame.file}>
+                <span
+                    className="shrink-0 truncate font-mono text-[11px] text-muted-foreground"
+                    title={frame.file}
+                >
                     {shortenFile(path)}
-                    {line ? <span className="text-violet-500 dark:text-violet-400">:{line}</span> : null}
+                    {line ? (
+                        <span className="text-violet-500 dark:text-violet-400">
+                            :{line}
+                        </span>
+                    ) : null}
                 </span>
-                <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', !open && '-rotate-90')} />
+                <ChevronDown
+                    className={cn(
+                        'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                        !open && '-rotate-90',
+                    )}
+                />
             </button>
             {open && snippet.length > 0 && (
                 <pre className="overflow-x-auto bg-muted/20 px-4 py-3 font-mono text-xs leading-relaxed">
@@ -414,10 +542,13 @@ function FrameRow({ frame, defaultOpen }: { frame: StackFrame; defaultOpen?: boo
                             key={entry.line}
                             className={cn(
                                 'grid grid-cols-[40px_1fr] items-baseline gap-3',
-                                entry.highlighted && 'bg-destructive/15 text-foreground',
+                                entry.highlighted &&
+                                    'bg-destructive/15 text-foreground',
                             )}
                         >
-                            <span className="text-right text-muted-foreground/60 select-none">{entry.line}</span>
+                            <span className="text-right text-muted-foreground/60 select-none">
+                                {entry.line}
+                            </span>
                             <span className="whitespace-pre">{entry.text}</span>
                         </div>
                     ))}
@@ -442,7 +573,12 @@ function VendorFrames({ frames }: { frames: StackFrame[] }) {
                     {frames.length} vendor frame{frames.length === 1 ? '' : 's'}
                 </span>
                 <span className="flex-1" />
-                <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
+                <ChevronRight
+                    className={cn(
+                        'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform',
+                        open && 'rotate-90',
+                    )}
+                />
             </button>
             {open && (
                 <ul className="divide-y divide-border/60 bg-muted/10">
@@ -451,11 +587,20 @@ function VendorFrames({ frames }: { frames: StackFrame[] }) {
                         const chain = buildChain(frame);
 
                         return (
-                            <li key={i} className="flex items-center gap-3 px-4 py-2">
-                                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground" title={chain}>
+                            <li
+                                key={i}
+                                className="flex items-center gap-3 px-4 py-2"
+                            >
+                                <span
+                                    className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground"
+                                    title={chain}
+                                >
                                     {chain}
                                 </span>
-                                <span className="shrink-0 truncate font-mono text-[11px] text-muted-foreground/80" title={frame.file}>
+                                <span
+                                    className="shrink-0 truncate font-mono text-[11px] text-muted-foreground/80"
+                                    title={frame.file}
+                                >
                                     {shortenFile(path)}
                                     {line ? `:${line}` : ''}
                                 </span>
@@ -474,7 +619,9 @@ function EntrypointFrame({ frame }: { frame: StackFrame }) {
     return (
         <div className="flex items-center gap-3 px-4 py-2.5">
             <Circle className="h-2 w-2 shrink-0 fill-muted-foreground/60 text-muted-foreground/60" />
-            <span className="text-[12px] text-muted-foreground">Entrypoint</span>
+            <span className="text-[12px] text-muted-foreground">
+                Entrypoint
+            </span>
             <span className="flex-1" />
             <span className="font-mono text-[11px] text-muted-foreground">
                 {shortenFile(path)}
@@ -487,13 +634,16 @@ function EntrypointFrame({ frame }: { frame: StackFrame }) {
 type SnippetLine = { line: number; text: string; highlighted: boolean };
 
 function buildSnippet(frame: StackFrame | undefined): SnippetLine[] {
-    if (!frame || !frame.code) return [];
+    if (!frame || !frame.code) {
+        return [];
+    }
 
     const target = parseFile(frame.file).line;
 
     return Object.entries(frame.code)
         .map(([key, text]) => {
             const lineNumber = Number(key);
+
             return {
                 line: lineNumber,
                 text,
@@ -504,12 +654,18 @@ function buildSnippet(frame: StackFrame | undefined): SnippetLine[] {
 }
 
 function buildChain(frame: StackFrame): string {
-    if (frame.source) return frame.source;
+    if (frame.source) {
+        return frame.source;
+    }
+
     return shortenFile(parseFile(frame.file).path);
 }
 
 function shortenFile(file: string): string {
-    if (!file) return '';
+    if (!file) {
+        return '';
+    }
+
     return file.replace(/^.*?\/(app|vendor)\//, '$1/');
 }
 
@@ -521,29 +677,39 @@ function OccurrencesSection({ issue }: { issue: Issue }) {
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                     <Circle className="h-3 w-3 fill-rose-500 text-rose-500" />
-                    <span className="font-medium">{list.length} {list.length === 1 ? 'occurrence' : 'occurrences'}</span>
+                    <span className="font-medium">
+                        {list.length}{' '}
+                        {list.length === 1 ? 'occurrence' : 'occurrences'}
+                    </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
                     <span className="text-muted-foreground">Last 30 days</span>
                     <Separator orientation="vertical" className="h-4" />
                     {issue.environments.slice(0, 1).map((env) => (
-                        <span key={env.environment} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-0.5">
+                        <span
+                            key={env.environment}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-0.5"
+                        >
                             <Circle className="h-2 w-2 fill-orange-500 text-orange-500" />
-                            <span className="capitalize">{env.environment}</span>
+                            <span className="capitalize">
+                                {env.environment}
+                            </span>
                         </span>
                     ))}
                 </div>
             </div>
 
             <Card className="overflow-hidden p-0">
-                <div className="grid grid-cols-[160px_220px_minmax(0,1fr)_140px] gap-4 border-b border-border px-5 py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <div className="grid grid-cols-[160px_220px_minmax(0,1fr)_140px] gap-4 border-b border-border px-5 py-2.5 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
                     <span>Date</span>
                     <span>Source</span>
                     <span>Message</span>
                     <span className="text-right">User</span>
                 </div>
                 {list.length === 0 ? (
-                    <div className="px-5 py-10 text-center text-sm text-muted-foreground">No occurrences captured.</div>
+                    <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                        No occurrences captured.
+                    </div>
                 ) : (
                     <ul className="divide-y divide-border">
                         {list.map((row) => (
@@ -551,20 +717,33 @@ function OccurrencesSection({ issue }: { issue: Issue }) {
                                 key={row.id}
                                 className="grid grid-cols-[160px_220px_minmax(0,1fr)_140px] items-center gap-4 px-5 py-2.5 text-sm"
                             >
-                                <span className="font-mono text-[11px] text-muted-foreground">{formatRelative(row.occurred_at)}</span>
+                                <span className="font-mono text-[11px] text-muted-foreground">
+                                    {formatRelative(row.occurred_at)}
+                                </span>
                                 <span className="flex min-w-0 items-center gap-2">
                                     <SourceBadge type={row.source_type} />
                                     {row.source_label && (
-                                        <span className="truncate font-mono text-[11px] text-muted-foreground" title={row.source_label}>
+                                        <span
+                                            className="truncate font-mono text-[11px] text-muted-foreground"
+                                            title={row.source_label}
+                                        >
                                             {row.source_label}
                                         </span>
                                     )}
                                 </span>
-                                <span className="truncate text-[12px] text-foreground" title={row.message ?? ''}>
+                                <span
+                                    className="truncate text-[12px] text-foreground"
+                                    title={row.message ?? ''}
+                                >
                                     {row.message ?? '—'}
                                 </span>
                                 <span className="flex items-center justify-end gap-1.5 truncate text-right text-[12px] text-muted-foreground">
-                                    <span className="truncate">{row.user_name ?? row.user_email ?? row.user_identifier ?? 'Guest'}</span>
+                                    <span className="truncate">
+                                        {row.user_name ??
+                                            row.user_email ??
+                                            row.user_identifier ??
+                                            'Guest'}
+                                    </span>
                                     <ExternalLink className="h-3 w-3 shrink-0" />
                                 </span>
                             </li>
@@ -578,7 +757,7 @@ function OccurrencesSection({ issue }: { issue: Issue }) {
 
 function SourceBadge({ type }: { type: string }) {
     return (
-        <span className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
             {type}
         </span>
     );
@@ -598,7 +777,10 @@ function ActivitySection({
     const [submitting, setSubmitting] = useState(false);
 
     const submitComment = (resolve: boolean) => {
-        if (!body.trim()) return;
+        if (!body.trim()) {
+            return;
+        }
+
         setSubmitting(true);
         router.post(
             comments.store([projectSlug, issue.display_number]).url,
@@ -612,9 +794,13 @@ function ActivitySection({
     };
 
     const deleteComment = (commentId: number) => {
-        router.delete(comments.destroy([projectSlug, issue.display_number, commentId]).url, {
-            preserveScroll: true,
-        });
+        router.delete(
+            comments.destroy([projectSlug, issue.display_number, commentId])
+                .url,
+            {
+                preserveScroll: true,
+            },
+        );
     };
 
     const userInitial = currentUser?.name?.charAt(0).toUpperCase() ?? 'A';
@@ -629,7 +815,10 @@ function ActivitySection({
                         <Circle className="h-3 w-3 fill-current" />
                     </span>
                     <div className="text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Watchtower</span> created the issue ·{' '}
+                        <span className="font-medium text-foreground">
+                            Watchtower
+                        </span>{' '}
+                        created the issue ·{' '}
                         {formatRelative(issue.first_occurrence_at)}
                     </div>
                 </li>
@@ -640,21 +829,32 @@ function ActivitySection({
                         <div className="flex-1 rounded-lg border border-border bg-card">
                             <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs">
                                 <span>
-                                    <span className="font-medium text-foreground">{comment.user?.name ?? 'Unknown'}</span>{' '}
-                                    <span className="text-muted-foreground">commented · {formatRelative(comment.created_at)}</span>
+                                    <span className="font-medium text-foreground">
+                                        {comment.user?.name ?? 'Unknown'}
+                                    </span>{' '}
+                                    <span className="text-muted-foreground">
+                                        commented ·{' '}
+                                        {formatRelative(comment.created_at)}
+                                    </span>
                                 </span>
-                                {currentUser && comment.user?.id === Number(currentUser.id) && (
-                                    <button
-                                        type="button"
-                                        onClick={() => deleteComment(comment.id)}
-                                        className="text-muted-foreground hover:text-foreground"
-                                        aria-label="Delete comment"
-                                    >
-                                        <MoreHorizontal className="h-3.5 w-3.5" />
-                                    </button>
-                                )}
+                                {currentUser &&
+                                    comment.user?.id ===
+                                        Number(currentUser.id) && (
+                                        <button
+                                            type="button"
+                                            onClick={() =>
+                                                deleteComment(comment.id)
+                                            }
+                                            className="text-muted-foreground hover:text-foreground"
+                                            aria-label="Delete comment"
+                                        >
+                                            <MoreHorizontal className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
                             </div>
-                            <div className="px-3 py-2 text-sm whitespace-pre-wrap">{comment.body}</div>
+                            <div className="px-3 py-2 text-sm whitespace-pre-wrap">
+                                {comment.body}
+                            </div>
                         </div>
                     </li>
                 ))}
@@ -664,15 +864,28 @@ function ActivitySection({
                 <Avatar name={userInitial} />
                 <Card className="flex-1 overflow-hidden p-0">
                     <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-                        <span className="text-sm font-medium">Add a comment</span>
+                        <span className="text-sm font-medium">
+                            Add a comment
+                        </span>
                     </div>
                     <div className="border-b border-border px-3 py-1.5">
-                        <Tabs value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
+                        <Tabs
+                            value={mode}
+                            onValueChange={(value) =>
+                                setMode(value as typeof mode)
+                            }
+                        >
                             <TabsList className="h-7 bg-transparent p-0">
-                                <TabsTrigger value="write" className="px-3 text-xs data-[state=active]:bg-muted">
+                                <TabsTrigger
+                                    value="write"
+                                    className="px-3 text-xs data-[state=active]:bg-muted"
+                                >
                                     Write
                                 </TabsTrigger>
-                                <TabsTrigger value="preview" className="px-3 text-xs data-[state=active]:bg-muted">
+                                <TabsTrigger
+                                    value="preview"
+                                    className="px-3 text-xs data-[state=active]:bg-muted"
+                                >
                                     Preview
                                 </TabsTrigger>
                             </TabsList>
@@ -682,7 +895,9 @@ function ActivitySection({
                         {mode === 'write' ? (
                             <textarea
                                 value={body}
-                                onChange={(event) => setBody(event.target.value)}
+                                onChange={(event) =>
+                                    setBody(event.target.value)
+                                }
                                 placeholder="Add a comment..."
                                 className="min-h-20 w-full resize-y border-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
                             />
@@ -700,7 +915,11 @@ function ActivitySection({
                             Resolve now
                             <ChevronDown className="ml-1 h-3 w-3" />
                         </Button>
-                        <Button size="sm" disabled={!body.trim() || submitting} onClick={() => submitComment(false)}>
+                        <Button
+                            size="sm"
+                            disabled={!body.trim() || submitting}
+                            onClick={() => submitComment(false)}
+                        >
                             Comment
                         </Button>
                     </div>
@@ -725,7 +944,7 @@ function ManagePanel({
 }) {
     return (
         <Card className="overflow-hidden p-0">
-            <div className="border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="border-b border-border px-4 py-2 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                 Manage
             </div>
             <div className="flex flex-col">
@@ -733,7 +952,12 @@ function ManagePanel({
                     <Select value={issue.status} onValueChange={onStatus}>
                         <SelectTrigger className="h-7 w-auto border-0 bg-transparent px-1 text-xs hover:bg-muted/50">
                             <div className="inline-flex items-center gap-1.5">
-                                <Circle className={cn('h-2 w-2 shrink-0', statusDotColor(issue.status))} />
+                                <Circle
+                                    className={cn(
+                                        'h-2 w-2 shrink-0',
+                                        statusDotColor(issue.status),
+                                    )}
+                                />
                                 <SelectValue />
                             </div>
                         </SelectTrigger>
@@ -759,8 +983,16 @@ function ManagePanel({
                 </PanelRow>
                 <PanelRow label="Assignee">
                     <Select
-                        value={issue.assigned_to ? String(issue.assigned_to.id) : 'unassigned'}
-                        onValueChange={(value) => onAssignee(value === 'unassigned' ? null : Number(value))}
+                        value={
+                            issue.assigned_to
+                                ? String(issue.assigned_to.id)
+                                : 'unassigned'
+                        }
+                        onValueChange={(value) =>
+                            onAssignee(
+                                value === 'unassigned' ? null : Number(value),
+                            )
+                        }
                     >
                         <SelectTrigger className="h-7 w-auto border-0 bg-transparent px-1 text-xs hover:bg-muted/50">
                             <div className="inline-flex items-center gap-1.5">
@@ -769,9 +1001,14 @@ function ManagePanel({
                             </div>
                         </SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="unassigned">Unassigned</SelectItem>
+                            <SelectItem value="unassigned">
+                                Unassigned
+                            </SelectItem>
                             {assignableUsers.map((user) => (
-                                <SelectItem key={user.id} value={String(user.id)}>
+                                <SelectItem
+                                    key={user.id}
+                                    value={String(user.id)}
+                                >
                                     {user.name}
                                 </SelectItem>
                             ))}
@@ -786,15 +1023,19 @@ function ManagePanel({
 function DetailsPanel({ issue }: { issue: Issue }) {
     return (
         <Card className="overflow-hidden p-0">
-            <div className="border-b border-border px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="border-b border-border px-4 py-2 text-[11px] font-semibold tracking-wider text-muted-foreground uppercase">
                 Details
             </div>
             <div className="flex flex-col">
                 <PanelRow label="First seen">
-                    <span className="text-xs">{formatRelative(issue.first_occurrence_at)}</span>
+                    <span className="text-xs">
+                        {formatRelative(issue.first_occurrence_at)}
+                    </span>
                 </PanelRow>
                 <PanelRow label="Last seen">
-                    <span className="text-xs">{formatRelative(issue.last_occurrence_at)}</span>
+                    <span className="text-xs">
+                        {formatRelative(issue.last_occurrence_at)}
+                    </span>
                 </PanelRow>
             </div>
         </Card>
@@ -805,12 +1046,16 @@ function OccurrencesPanel({ issue }: { issue: Issue }) {
     return (
         <Card className="overflow-hidden p-0">
             <div className="flex items-center justify-between border-b border-border px-4 py-2 text-[11px] tracking-wider uppercase">
-                <span className="font-semibold text-muted-foreground">Occurrences</span>
+                <span className="font-semibold text-muted-foreground">
+                    Occurrences
+                </span>
                 <span className="text-muted-foreground">Last 14 days</span>
             </div>
             <ul className="flex flex-col">
                 {issue.environments.length === 0 ? (
-                    <li className="px-4 py-3 text-xs text-muted-foreground">No environments captured</li>
+                    <li className="px-4 py-3 text-xs text-muted-foreground">
+                        No environments captured
+                    </li>
                 ) : (
                     issue.environments.map((env) => (
                         <li
@@ -819,7 +1064,9 @@ function OccurrencesPanel({ issue }: { issue: Issue }) {
                         >
                             <span className="inline-flex items-center gap-1.5">
                                 <Circle className="h-2 w-2 fill-orange-500 text-orange-500" />
-                                <span className="capitalize">{env.environment}</span>
+                                <span className="capitalize">
+                                    {env.environment}
+                                </span>
                             </span>
                             <span
                                 aria-hidden
@@ -837,7 +1084,13 @@ function OccurrencesPanel({ issue }: { issue: Issue }) {
     );
 }
 
-function LinearButton({ issue, onSave }: { issue: Issue; onSave: (url: string | null) => void }) {
+function LinearButton({
+    issue,
+    onSave,
+}: {
+    issue: Issue;
+    onSave: (url: string | null) => void;
+}) {
     const [editing, setEditing] = useState(false);
     const [value, setValue] = useState(issue.linear_issue_url ?? '');
 
@@ -854,7 +1107,11 @@ function LinearButton({ issue, onSave }: { issue: Issue; onSave: (url: string | 
                     Linear issue
                     <ExternalLink className="h-3 w-3" />
                 </a>
-                <button type="button" onClick={() => setEditing(true)} className="text-muted-foreground hover:text-foreground">
+                <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="text-muted-foreground hover:text-foreground"
+                >
                     Edit
                 </button>
             </div>
@@ -863,7 +1120,11 @@ function LinearButton({ issue, onSave }: { issue: Issue; onSave: (url: string | 
 
     if (!editing) {
         return (
-            <Button variant="outline" className="w-full justify-start gap-2" onClick={() => setEditing(true)}>
+            <Button
+                variant="outline"
+                className="w-full justify-start gap-2"
+                onClick={() => setEditing(true)}
+            >
                 <LinkIcon className="h-4 w-4" />
                 Link to Linear
             </Button>
@@ -887,7 +1148,12 @@ function LinearButton({ issue, onSave }: { issue: Issue; onSave: (url: string | 
                 className="h-8 text-xs"
             />
             <div className="flex justify-end gap-2">
-                <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(false)}>
+                <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setEditing(false)}
+                >
                     Cancel
                 </Button>
                 <Button type="submit" size="sm">
@@ -898,7 +1164,13 @@ function LinearButton({ issue, onSave }: { issue: Issue; onSave: (url: string | 
     );
 }
 
-function PanelRow({ label, children }: { label: string; children: React.ReactNode }) {
+function PanelRow({
+    label,
+    children,
+}: {
+    label: string;
+    children: React.ReactNode;
+}) {
     return (
         <div className="flex items-center justify-between gap-2 px-4 py-2 text-xs">
             <span className="text-muted-foreground">{label}</span>
@@ -910,13 +1182,20 @@ function PanelRow({ label, children }: { label: string; children: React.ReactNod
 function HandledBadge({ handled }: { handled: boolean }) {
     if (handled) {
         return (
-            <Badge variant="muted" className="font-mono text-[10px] tracking-wide uppercase">
+            <Badge
+                variant="muted"
+                className="font-mono text-[10px] tracking-wide uppercase"
+            >
                 Handled
             </Badge>
         );
     }
+
     return (
-        <Badge variant="destructive" className="font-mono text-[10px] tracking-wide uppercase">
+        <Badge
+            variant="destructive"
+            className="font-mono text-[10px] tracking-wide uppercase"
+        >
             Unhandled
         </Badge>
     );
@@ -925,8 +1204,12 @@ function HandledBadge({ handled }: { handled: boolean }) {
 function VersionPill({ label, value }: { label: string; value: string }) {
     return (
         <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 text-[11px]">
-            <span className="uppercase tracking-wider text-muted-foreground">{label}</span>
-            <span className="font-mono font-semibold text-foreground">{value}</span>
+            <span className="tracking-wider text-muted-foreground uppercase">
+                {label}
+            </span>
+            <span className="font-mono font-semibold text-foreground">
+                {value}
+            </span>
         </span>
     );
 }
@@ -962,13 +1245,29 @@ function statusDotColor(status: string): string {
 }
 
 function formatRelative(iso: string | null): string {
-    if (!iso) return '—';
+    if (!iso) {
+        return '—';
+    }
+
     const date = new Date(iso);
     const diff = Date.now() - date.getTime();
     const seconds = Math.floor(diff / 1000);
-    if (seconds < 60) return `${seconds}s ago`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    if (seconds < 86400 * 30) return `${Math.floor(seconds / 86400)} days ago`;
+
+    if (seconds < 60) {
+        return `${seconds}s ago`;
+    }
+
+    if (seconds < 3600) {
+        return `${Math.floor(seconds / 60)} minutes ago`;
+    }
+
+    if (seconds < 86400) {
+        return `${Math.floor(seconds / 3600)}h ago`;
+    }
+
+    if (seconds < 86400 * 30) {
+        return `${Math.floor(seconds / 86400)} days ago`;
+    }
+
     return date.toLocaleDateString();
 }

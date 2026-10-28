@@ -29,7 +29,10 @@ export function Pagination({ links, from, to, total }: PaginationProps) {
                         preserveScroll
                         only={[]}
                         className={cn(
-                            buttonVariants({ variant: link.active ? 'default' : 'outline', size: 'sm' }),
+                            buttonVariants({
+                                variant: link.active ? 'default' : 'outline',
+                                size: 'sm',
+                            }),
                             'h-7 min-w-8 px-2 text-xs',
                             !link.url && 'pointer-events-none opacity-40',
                         )}

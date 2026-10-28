@@ -20,20 +20,27 @@ import {
     Users,
     Workflow,
 } from 'lucide-react';
-import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { useTheme } from '@/hooks/use-theme';
 import { cn } from '@/lib/utils';
 import { dashboard } from '@/routes/projects';
+import cache from '@/routes/projects/cache';
 import commands from '@/routes/projects/commands';
 import exceptions from '@/routes/projects/exceptions';
-import issues from '@/routes/projects/issues';
-import cache from '@/routes/projects/cache';
 import httpClient from '@/routes/projects/http-client';
+import issues from '@/routes/projects/issues';
 import jobs from '@/routes/projects/jobs';
 import logs from '@/routes/projects/logs';
 import mail from '@/routes/projects/mail';
@@ -66,7 +73,12 @@ type NavItem = {
     badge?: number;
 };
 
-export function ProjectShell({ project, projects, user, children }: ProjectShellProps) {
+export function ProjectShell({
+    project,
+    projects,
+    user,
+    children,
+}: ProjectShellProps) {
     const groups = navigationGroups(project);
     const path = usePage().url;
     const [collapsed, toggleCollapsed] = useSidebarCollapsed();
@@ -101,7 +113,9 @@ export function ProjectShell({ project, projects, user, children }: ProjectShell
                             <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-emerald-500 text-xs font-semibold text-white">
                                 LW
                             </span>
-                            <span className="text-sm font-semibold tracking-tight">Watchtower</span>
+                            <span className="text-sm font-semibold tracking-tight">
+                                Watchtower
+                            </span>
                             <Button
                                 type="button"
                                 onClick={toggleCollapsed}
@@ -119,7 +133,10 @@ export function ProjectShell({ project, projects, user, children }: ProjectShell
 
                 {!collapsed && (
                     <>
-                        <ProjectSwitcher current={project} projects={projects} />
+                        <ProjectSwitcher
+                            current={project}
+                            projects={projects}
+                        />
                         <Separator />
                     </>
                 )}
@@ -141,14 +158,21 @@ export function ProjectShell({ project, projects, user, children }: ProjectShell
                                 {group.items.map((item) => {
                                     const active = item.matches(path);
                                     const Icon = item.icon;
+
                                     return (
                                         <li key={item.label}>
                                             <Link
                                                 href={item.href}
-                                                title={collapsed ? item.label : undefined}
+                                                title={
+                                                    collapsed
+                                                        ? item.label
+                                                        : undefined
+                                                }
                                                 className={cn(
                                                     'flex items-center rounded-md text-[13px] transition-colors',
-                                                    collapsed ? 'h-9 w-9 justify-center' : 'gap-2 px-2 py-1.5',
+                                                    collapsed
+                                                        ? 'h-9 w-9 justify-center'
+                                                        : 'gap-2 px-2 py-1.5',
                                                     active
                                                         ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground'
                                                         : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
@@ -157,12 +181,22 @@ export function ProjectShell({ project, projects, user, children }: ProjectShell
                                                 <Icon className="h-4 w-4 shrink-0" />
                                                 {!collapsed && (
                                                     <>
-                                                        <span className="flex-1">{item.label}</span>
-                                                        {typeof item.badge === 'number' && item.badge > 0 && (
-                                                            <Badge variant="muted" className="px-1.5 text-[10px] font-medium">
-                                                                {item.badge > 999 ? '999+' : item.badge}
-                                                            </Badge>
-                                                        )}
+                                                        <span className="flex-1">
+                                                            {item.label}
+                                                        </span>
+                                                        {typeof item.badge ===
+                                                            'number' &&
+                                                            item.badge > 0 && (
+                                                                <Badge
+                                                                    variant="muted"
+                                                                    className="px-1.5 text-[10px] font-medium"
+                                                                >
+                                                                    {item.badge >
+                                                                    999
+                                                                        ? '999+'
+                                                                        : item.badge}
+                                                                </Badge>
+                                                            )}
                                                     </>
                                                 )}
                                             </Link>
@@ -178,20 +212,28 @@ export function ProjectShell({ project, projects, user, children }: ProjectShell
                 <UserFooter user={user} collapsed={collapsed} />
             </aside>
 
-            <main className="flex min-w-0 flex-1 flex-col bg-muted/30">{children}</main>
+            <main className="flex min-w-0 flex-1 flex-col bg-muted/30">
+                {children}
+            </main>
         </div>
     );
 }
 
 function useSidebarCollapsed(): [boolean, () => void] {
     const [collapsed, setCollapsed] = useState<boolean>(() => {
-        if (typeof window === 'undefined') return false;
+        if (typeof window === 'undefined') {
+            return false;
+        }
+
         return window.localStorage.getItem('sidebar:collapsed') === '1';
     });
 
     useEffect(() => {
         try {
-            window.localStorage.setItem('sidebar:collapsed', collapsed ? '1' : '0');
+            window.localStorage.setItem(
+                'sidebar:collapsed',
+                collapsed ? '1' : '0',
+            );
         } catch {
             // ignore quota / privacy errors
         }
@@ -200,10 +242,18 @@ function useSidebarCollapsed(): [boolean, () => void] {
     return [collapsed, () => setCollapsed((c) => !c)];
 }
 
-function ProjectSwitcher({ current, projects }: { current: CurrentProject; projects: ProjectSummary[] }) {
+function ProjectSwitcher({
+    current,
+    projects,
+}: {
+    current: CurrentProject;
+    projects: ProjectSummary[];
+}) {
     return (
         <div className="px-3 py-3">
-            <div className="pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">Project</div>
+            <div className="pb-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+                Project
+            </div>
             <Select
                 value={current.slug}
                 onValueChange={(slug) => {
@@ -225,13 +275,25 @@ function ProjectSwitcher({ current, projects }: { current: CurrentProject; proje
     );
 }
 
-function UserFooter({ user, collapsed }: { user: User | null; collapsed: boolean }) {
+function UserFooter({
+    user,
+    collapsed,
+}: {
+    user: User | null;
+    collapsed: boolean;
+}) {
     const { theme, toggle } = useTheme();
 
     if (collapsed) {
         return (
             <div className="flex flex-col items-center gap-1 px-2 py-3">
-                <Button asChild variant="ghost" size="icon" className="h-8 w-8" title="Settings">
+                <Button
+                    asChild
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Settings"
+                >
                     <Link href={profile.show().url} aria-label="Settings">
                         <Settings className="h-4 w-4" />
                     </Link>
@@ -242,10 +304,18 @@ function UserFooter({ user, collapsed }: { user: User | null; collapsed: boolean
                     variant="ghost"
                     size="icon"
                     className="h-8 w-8"
-                    aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                    aria-label={
+                        theme === 'dark'
+                            ? 'Switch to light theme'
+                            : 'Switch to dark theme'
+                    }
                     title={theme === 'dark' ? 'Light theme' : 'Dark theme'}
                 >
-                    {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                    {theme === 'dark' ? (
+                        <Sun className="h-4 w-4" />
+                    ) : (
+                        <Moon className="h-4 w-4" />
+                    )}
                 </Button>
                 <Link
                     href={profile.show().url}
@@ -268,10 +338,20 @@ function UserFooter({ user, collapsed }: { user: User | null; collapsed: boolean
                 {(user?.name ?? 'G').charAt(0).toUpperCase()}
             </Link>
             <div className="min-w-0 flex-1 leading-tight">
-                <div className="truncate font-medium text-foreground">{user?.name ?? 'Guest'}</div>
-                <div className="truncate text-muted-foreground">{user?.email ?? 'Not signed in'}</div>
+                <div className="truncate font-medium text-foreground">
+                    {user?.name ?? 'Guest'}
+                </div>
+                <div className="truncate text-muted-foreground">
+                    {user?.email ?? 'Not signed in'}
+                </div>
             </div>
-            <Button asChild variant="ghost" size="icon" className="h-8 w-8" title="Settings">
+            <Button
+                asChild
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                title="Settings"
+            >
                 <Link href={profile.show().url} aria-label="Settings">
                     <Settings className="h-4 w-4" />
                 </Link>
@@ -282,9 +362,17 @@ function UserFooter({ user, collapsed }: { user: User | null; collapsed: boolean
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8"
-                aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+                aria-label={
+                    theme === 'dark'
+                        ? 'Switch to light theme'
+                        : 'Switch to dark theme'
+                }
             >
-                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+                {theme === 'dark' ? (
+                    <Sun className="h-4 w-4" />
+                ) : (
+                    <Moon className="h-4 w-4" />
+                )}
             </Button>
         </div>
     );
@@ -297,12 +385,20 @@ function navigationGroups(project: CurrentProject): NavGroup[] {
         {
             label: null,
             items: [
-                { label: 'Dashboard', icon: LayoutDashboard, href: dashboard(slug).url, matches: (p) => p.endsWith('/dashboard') },
+                {
+                    label: 'Dashboard',
+                    icon: LayoutDashboard,
+                    href: dashboard(slug).url,
+                    matches: (p) => p.endsWith('/dashboard'),
+                },
                 {
                     label: 'Issues',
                     icon: Bug,
                     href: issues.index(slug).url,
-                    matches: (p) => p.endsWith('/issues') || p.includes('/issues?') || p.includes('/issues/'),
+                    matches: (p) =>
+                        p.endsWith('/issues') ||
+                        p.includes('/issues?') ||
+                        p.includes('/issues/'),
                     badge: project.open_issues_count,
                 },
             ],
@@ -314,37 +410,51 @@ function navigationGroups(project: CurrentProject): NavGroup[] {
                     label: 'Requests',
                     icon: Activity,
                     href: requests.index(slug).url,
-                    matches: (p) => p.endsWith('/requests') || p.includes('/requests?'),
+                    matches: (p) =>
+                        p.endsWith('/requests') || p.includes('/requests?'),
                 },
                 {
                     label: 'Jobs',
                     icon: Workflow,
                     href: jobs.index(slug).url,
-                    matches: (p) => p.endsWith('/jobs') || p.includes('/jobs?') || p.includes('/jobs/'),
+                    matches: (p) =>
+                        p.endsWith('/jobs') ||
+                        p.includes('/jobs?') ||
+                        p.includes('/jobs/'),
                 },
                 {
                     label: 'Commands',
                     icon: Terminal,
                     href: commands.index(slug).url,
-                    matches: (p) => p.endsWith('/commands') || p.includes('/commands?') || p.includes('/commands/'),
+                    matches: (p) =>
+                        p.endsWith('/commands') ||
+                        p.includes('/commands?') ||
+                        p.includes('/commands/'),
                 },
                 {
                     label: 'Scheduled Tasks',
                     icon: CalendarClock,
                     href: scheduledTasks.index(slug).url,
-                    matches: (p) => p.endsWith('/scheduled-tasks') || p.includes('/scheduled-tasks?') || p.includes('/scheduled-tasks/'),
+                    matches: (p) =>
+                        p.endsWith('/scheduled-tasks') ||
+                        p.includes('/scheduled-tasks?') ||
+                        p.includes('/scheduled-tasks/'),
                 },
                 {
                     label: 'Exceptions',
                     icon: AlertTriangle,
                     href: exceptions.index(slug).url,
-                    matches: (p) => p.endsWith('/exceptions') || p.includes('/exceptions?'),
+                    matches: (p) =>
+                        p.endsWith('/exceptions') || p.includes('/exceptions?'),
                 },
                 {
                     label: 'Queries',
                     icon: Database,
                     href: queries.index(slug).url,
-                    matches: (p) => p.endsWith('/queries') || p.includes('/queries?') || p.includes('/queries/'),
+                    matches: (p) =>
+                        p.endsWith('/queries') ||
+                        p.includes('/queries?') ||
+                        p.includes('/queries/'),
                 },
                 {
                     label: 'Cache',
@@ -379,7 +489,10 @@ function navigationGroups(project: CurrentProject): NavGroup[] {
                     label: 'Users',
                     icon: Users,
                     href: users.index(slug).url,
-                    matches: (p) => p.endsWith('/users') || p.includes('/users?') || p.includes('/users/'),
+                    matches: (p) =>
+                        p.endsWith('/users') ||
+                        p.includes('/users?') ||
+                        p.includes('/users/'),
                 },
                 {
                     label: 'Logs',

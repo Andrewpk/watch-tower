@@ -10,6 +10,7 @@ function readStoredTheme(): Theme {
     }
 
     const stored = window.localStorage.getItem(STORAGE_KEY);
+
     if (stored === 'light' || stored === 'dark') {
         return stored;
     }
@@ -19,6 +20,7 @@ function readStoredTheme(): Theme {
 
 function applyTheme(theme: Theme) {
     const root = document.documentElement;
+
     if (theme === 'dark') {
         root.classList.add('dark');
     } else {
@@ -26,7 +28,11 @@ function applyTheme(theme: Theme) {
     }
 }
 
-export function useTheme(): { theme: Theme; setTheme: (theme: Theme) => void; toggle: () => void } {
+export function useTheme(): {
+    theme: Theme;
+    setTheme: (theme: Theme) => void;
+    toggle: () => void;
+} {
     const [theme, setThemeState] = useState<Theme>(() => readStoredTheme());
 
     useEffect(() => {
