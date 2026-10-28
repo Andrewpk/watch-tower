@@ -3,7 +3,9 @@
 namespace App\Http\Middleware;
 
 use App\Models\Project;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Crypt;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -38,6 +40,7 @@ class HandleInertiaRequests extends Middleware
             'flash' => [
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                'new_api_key' => fn () => $this->newApiKey($request),
             ],
             'currentProject' => $currentProject instanceof Project ? [
                 'id' => $currentProject->id,
@@ -66,5 +69,28 @@ class HandleInertiaRequests extends Middleware
                     ->all();
             },
         ];
+    }
+
+    /**
+     * The API key flashed by project creation or key rotation, for display once.
+     *
+     * @return array{project: string, key: string}|null
+     */
+    private function newApiKey(Request $request): ?array
+    {
+        $flashed = $request->session()->get('new_api_key');
+
+        if (! is_array($flashed) || ! isset($flashed['project'], $flashed['key'])) {
+            return null;
+        }
+
+        try {
+            return [
+                'project' => $flashed['project'],
+                'key' => Crypt::decryptString($flashed['key']),
+            ];
+        } catch (DecryptException) {
+            return null;
+        }
     }
 }

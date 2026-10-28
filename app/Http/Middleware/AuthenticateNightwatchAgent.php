@@ -22,11 +22,13 @@ class AuthenticateNightwatchAgent
             return $this->unauthorized('Missing environment token');
         }
 
-        $project = Project::where('api_key', $token)->first();
+        $project = Project::findByApiKey($token);
 
         if (! $project) {
             return $this->unauthorized('Invalid environment token');
         }
+
+        $project->recordApiKeyUse();
 
         $request->attributes->set('watch_project', $project);
 

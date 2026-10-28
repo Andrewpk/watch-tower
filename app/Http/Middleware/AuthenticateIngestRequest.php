@@ -24,11 +24,13 @@ class AuthenticateIngestRequest
             ], 401);
         }
 
-        $project = Project::where('api_key', $apiKey)->first();
+        $project = Project::findByApiKey($apiKey);
 
         if (! $project) {
             return response()->json(['error' => 'Invalid API key.'], 401);
         }
+
+        $project->recordApiKeyUse();
 
         $request->attributes->set('watch_project', $project);
 

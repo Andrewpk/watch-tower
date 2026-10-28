@@ -36,6 +36,7 @@ it('issues a short-lived ingest token for a known project', function () {
 
     expect($payload['project_id'])->toBe($project->id);
     expect($payload['expires_at'])->toBeGreaterThan(time());
+    expect($payload['key_version'])->toBe(1);
     expect($response->json('ingest_url'))->toBe(route('api.nightwatch.ingest'));
 });
 
