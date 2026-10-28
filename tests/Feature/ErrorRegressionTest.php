@@ -72,12 +72,46 @@ it('only records one regression until the issue is resolved again', function () 
     ($this->ingest)('2026-03-01T10:00:00Z');
 
     $group = ErrorGroup::where('project_id', $this->project->id)->sole();
-    $group->forceFill(['status' => 'resolved', 'resolved_at' => now()])->save();
+    $group->forceFill(['status' => 'resolved', 'resolved_at' => '2026-03-01T12:00:00Z'])->save();
 
     ($this->ingest)('2026-03-02T10:00:00Z');
     ($this->ingest)('2026-03-03T10:00:00Z');
 
     expect($group->refresh()->total_count)->toBe(3)
+        ->and($group->comments()->where('type', 'regression')->count())->toBe(1);
+});
+
+it('counts an occurrence that predates the resolution without reopening the issue', function () {
+    ($this->ingest)('2026-03-01T10:00:00Z');
+
+    $group = ErrorGroup::where('project_id', $this->project->id)->sole();
+    $group->forceFill([
+        'status' => 'resolved',
+        'resolved_at' => '2026-03-02T09:00:00Z',
+        'resolved_by_user_id' => $this->user->id,
+    ])->save();
+
+    ($this->ingest)('2026-03-02T08:59:59Z');
+
+    $group->refresh();
+
+    expect($group->status)->toBe('resolved')
+        ->and($group->resolved_at->toIso8601String())->toBe('2026-03-02T09:00:00+00:00')
+        ->and($group->resolved_by_user_id)->toBe($this->user->id)
+        ->and($group->total_count)->toBe(2)
+        ->and($group->last_occurrence_at->toIso8601String())->toBe('2026-03-02T08:59:59+00:00')
+        ->and($group->comments()->count())->toBe(0);
+
+    ($this->ingest)('2026-03-02T09:00:00Z');
+
+    expect($group->refresh()->status)->toBe('resolved')
+        ->and($group->total_count)->toBe(3)
+        ->and($group->comments()->count())->toBe(0);
+
+    ($this->ingest)('2026-03-02T09:00:01Z');
+
+    expect($group->refresh()->status)->toBe('unresolved')
+        ->and($group->total_count)->toBe(4)
         ->and($group->comments()->where('type', 'regression')->count())->toBe(1);
 });
 
@@ -117,7 +151,7 @@ it('shows the regression on the issue page as a system entry', function () {
     ($this->ingest)('2026-03-01T10:00:00Z');
 
     $group = ErrorGroup::where('project_id', $this->project->id)->sole();
-    $group->forceFill(['status' => 'resolved', 'resolved_at' => now(), 'resolved_by_user_id' => $this->user->id])->save();
+    $group->forceFill(['status' => 'resolved', 'resolved_at' => '2026-03-02T09:00:00Z', 'resolved_by_user_id' => $this->user->id])->save();
     $group->comments()->create(['user_id' => $this->user->id, 'type' => 'comment', 'body' => 'Shipped a fix.']);
 
     ($this->ingest)('2026-03-05T10:00:00Z');
@@ -146,7 +180,7 @@ it('lists a reopened issue under the open tab and not under resolved', function 
     ($this->ingest)('2026-03-01T10:00:00Z');
 
     $group = ErrorGroup::where('project_id', $this->project->id)->sole();
-    $group->forceFill(['status' => 'resolved', 'resolved_at' => now()])->save();
+    $group->forceFill(['status' => 'resolved', 'resolved_at' => '2026-03-02T09:00:00Z'])->save();
 
     ($this->ingest)('2026-03-05T10:00:00Z');
 

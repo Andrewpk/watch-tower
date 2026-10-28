@@ -238,8 +238,10 @@ class EventStore
      *
      * The counter is bumped with a single atomic UPDATE and `last_occurrence_at`
      * never moves backwards, so out-of-order events cannot rewind it. A resolved
-     * group is reopened and the regression is logged on its timeline, while an
-     * ignored group keeps its status.
+     * group is reopened and the regression is logged on its timeline only when
+     * the occurrence happened after it was resolved; an older event that was
+     * still queued when the fix shipped is counted but leaves the group
+     * resolved. An ignored group keeps its status.
      */
     private function recordRecurrence(ErrorGroup $group, CarbonImmutable $occurredAt): void
     {
@@ -251,7 +253,10 @@ class EventStore
 
         $regression = null;
 
-        if ($group->status === 'resolved') {
+        $isRegression = $group->status === 'resolved'
+            && ($group->resolved_at === null || $occurredAt->greaterThan($group->resolved_at));
+
+        if ($isRegression) {
             $regression = [
                 'previous_status' => 'resolved',
                 'resolved_at' => $group->resolved_at?->toIso8601String(),
