@@ -65,4 +65,5 @@ SQLite works for a single host. Containers on different hosts need MySQL.
 ## Notes
 
 - TLS and reverse proxy setup, SQLite tuning and a Compose stack are tracked in [#19](https://github.com/Andrewpk/watch-tower/issues/19). The app does not trust `X-Forwarded-*` headers yet, so behind an HTTPS proxy generated URLs may use `http://`.
-- Build it yourself with `docker build -t watch-tower .`. Pin PHP with `--build-arg PHP_IMAGE=serversideup/php:8.4-frankenphp`.
+- Build it yourself with `docker build -t watch-tower .`. The PHP image is pinned by digest in the `Dockerfile`; override it with `--build-arg PHP_IMAGE=serversideup/php:<tag>`.
+- SQLite runs in WAL mode with a 5 second busy timeout (`DB_JOURNAL_MODE`, `DB_BUSY_TIMEOUT`).
