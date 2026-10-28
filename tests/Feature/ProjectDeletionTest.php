@@ -115,7 +115,7 @@ it('stops a run after its chunk budget and dispatches itself again', function ()
 
     Bus::fake();
 
-    (new DeleteProjectData($this->project->id, maxChunks: 1))->handle(new TelemetryPruner(1));
+    (new DeleteProjectData($this->project->id, maxChunks: 1))->withFakeQueueInteractions()->handle(new TelemetryPruner(1));
 
     expect(remainingProjectRows($this->project))->toBe($before - 1)
         ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeTrue();
@@ -139,7 +139,7 @@ it('removes the project and all its telemetry after repeated time-boxed runs', f
     $runs = 0;
 
     while ($job !== null && $runs < 200) {
-        $job->handle($pruner);
+        $job->withFakeQueueInteractions()->handle($pruner);
         $runs++;
         $job = Bus::dispatched(DeleteProjectData::class)->get($runs - 1);
     }
@@ -148,6 +148,36 @@ it('removes the project and all its telemetry after repeated time-boxed runs', f
         ->and($job)->toBeNull()
         ->and(Bus::dispatched(DeleteProjectData::class))->toHaveCount($runs - 1)
         ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(remainingProjectRows($this->project))->toBe(0);
+});
+
+it('purges to completion in a single run when dispatched on the sync queue', function () {
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+
+    config(['queue.default' => 'sync']);
+    app()->instance(TelemetryPruner::class, new TelemetryPruner(1));
+
+    DeleteProjectData::dispatch($this->project->id, maxChunks: 1);
+
+    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(remainingProjectRows($this->project))->toBe(0);
+});
+
+it('purges to completion in a single run when handled with no queue job attached', function () {
+    seedTelemetry($this->project, now());
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+
+    Bus::fake();
+
+    (new DeleteProjectData($this->project->id, maxChunks: 1))->handle(new TelemetryPruner(1));
+
+    Bus::assertNotDispatched(DeleteProjectData::class);
+
+    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
         ->and(remainingProjectRows($this->project))->toBe(0);
 });
 

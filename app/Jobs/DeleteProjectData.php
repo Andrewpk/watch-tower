@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Watch\TelemetryPruner;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Jobs\SyncJob;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 
 /**
@@ -18,16 +19,22 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
  * removed. Every step is idempotent, so a retry after a failure simply
  * continues where the previous attempt stopped.
  *
- * Each run is time-boxed to {@see self::RUN_BUDGET_SECONDS}. A project too big
- * to purge within that dispatches a fresh job (with fresh attempts) and exits,
- * and only the run that finds nothing left deletes the project row. This keeps
- * a run well under the queue's `retry_after`, so the queue never hands a
- * still-running job to a second worker.
+ * On a real queue each run is time-boxed to {@see self::RUN_BUDGET_SECONDS}. A
+ * project too big to purge within that dispatches a fresh job (with fresh
+ * attempts) and exits, and only the run that finds nothing left deletes the
+ * project row. This keeps a run well under the queue's `retry_after`, so the
+ * queue never hands a still-running job to a second worker.
+ *
+ * On the `sync` connection (a {@see SyncJob}, which is also what `dispatchSync()`
+ * uses) there is no `retry_after`, and a continuation could not run anyway
+ * because it would find the overlap lock held by the job that dispatched it.
+ * So the job ignores both budgets and purges to completion in a single run,
+ * which just makes the request that triggered it take longer. A job with no
+ * queue job attached, such as one whose `handle()` is called directly, is
+ * treated the same way.
  *
  * The job does nothing for a project that is not marked as deleting, so it can
- * never remove a live project. Under the `sync` queue driver a continuation
- * cannot run inside the job that dispatched it (it finds the overlap lock held),
- * so very large projects need a real queue worker.
+ * never remove a live project.
  */
 class DeleteProjectData implements ShouldQueue
 {
@@ -58,7 +65,7 @@ class DeleteProjectData implements ShouldQueue
     public int $timeout = 80;
 
     /**
-     * @param  int|null  $maxChunks  most chunks to delete per run, besides the time budget; null for no limit
+     * @param  int|null  $maxChunks  most chunks to delete per run, besides the time budget; null for no limit. Ignored on the sync connection.
      */
     public function __construct(
         public readonly string $projectId,
@@ -89,7 +96,9 @@ class DeleteProjectData implements ShouldQueue
             return;
         }
 
-        $result = $pruner->purge($project->id, $this->maxChunks, microtime(true) + self::RUN_BUDGET_SECONDS);
+        $result = $this->isTimeBoxed()
+            ? $pruner->purge($project->id, $this->maxChunks, microtime(true) + self::RUN_BUDGET_SECONDS)
+            : $pruner->purge($project->id);
 
         if (! $result['finished']) {
             self::dispatch($this->projectId, $this->maxChunks)->delay(self::CONTINUATION_DELAY_SECONDS);
@@ -98,5 +107,15 @@ class DeleteProjectData implements ShouldQueue
         }
 
         $project->delete();
+    }
+
+    /**
+     * Whether this run is on a real queue and must stay under its `retry_after`.
+     *
+     * False for the sync connection and when no queue job is attached.
+     */
+    private function isTimeBoxed(): bool
+    {
+        return $this->job !== null && ! $this->job instanceof SyncJob;
     }
 }
