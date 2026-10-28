@@ -106,7 +106,8 @@ ENV APP_ENV=production \
     DB_CONNECTION=sqlite \
     DB_DATABASE=/var/www/html/storage/database/database.sqlite \
     HEALTHCHECK_PATH=/up \
-    PHP_OPCACHE_ENABLE=1
+    PHP_OPCACHE_ENABLE=1 \
+    TELESCOPE_ENABLED=false
 
 # vendor changes least often, so it gets its own layer.
 COPY --from=build --chown=www-data:www-data /var/www/html/vendor ./vendor

@@ -16,10 +16,10 @@ Nothing secret is baked into the image. Pass settings with `-e` or `--env-file`.
 | --- | --- |
 | `APP_KEY` | **Required.** Generate one with `echo "base64:$(openssl rand -base64 32)"`. Keep it stable between restarts. |
 | `APP_URL` | **Required.** The public URL, for example `https://watch.example.com`. |
-| `DB_*` | Defaults to SQLite at `/var/www/html/storage/database/database.sqlite`. For MySQL or PostgreSQL set `DB_CONNECTION`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`. |
+| `DB_*` | Defaults to SQLite at `/var/www/html/storage/database/database.sqlite`. For MySQL 8 set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`. PostgreSQL is not supported yet ([#19](https://github.com/Andrewpk/watch-tower/issues/19)). |
 | `AUTORUN_ENABLED` | Defaults to `false`. Set `true` on the web container to run migrations and cache config, routes, views and events on every start. |
 
-The image sets `APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr` (read logs with `docker logs`) and `HEALTHCHECK_PATH=/up`.
+The image sets `APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr` (read logs with `docker logs`), `HEALTHCHECK_PATH=/up` and `TELESCOPE_ENABLED=false`.
 
 ## Persistent data
 
@@ -38,7 +38,7 @@ docker run -d --name watch-tower -p 8080:8080 \
   ghcr.io/andrewpk/watch-tower:1.2.3
 ```
 
-Check `curl http://localhost:8080/up`, then open the app. There is no sign-up page. Create the first user with the seeder, then log in as `super@admin.test` / `12345678` and change the password straight away:
+Check `curl http://localhost:8080/up`, then open the app. There is no sign-up page. Create the first user with the seeder, then log in as `super@admin.test` / `12345678` and change the password straight away. The seeded password is public, so do this before the container is reachable from the internet:
 
 ```bash
 docker exec watch-tower php artisan db:seed --class=SuperAdminSeeder --force
@@ -58,7 +58,7 @@ docker run -d --name watch-tower-scheduler --no-healthcheck \
   ghcr.io/andrewpk/watch-tower:1.2.3 php artisan schedule:work
 ```
 
-SQLite works for a single host. Containers on different hosts need MySQL or PostgreSQL.
+SQLite works for a single host. Containers on different hosts need MySQL.
 
 ## Notes
 

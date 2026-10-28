@@ -1,8 +1,8 @@
 name: Release image
 
 # Publishing a GitHub release builds the production image and pushes it to
-# ghcr.io/<owner>/<repo>. Run it by hand (Actions > Release image > Run
-# workflow) to check that the image still builds; manual runs never push.
+# ghcr.io/<owner>/<repo>. PRs that touch the image files, and manual runs
+# (Actions > Release image > Run workflow), only check that it builds.
 #
 # Release tags must be semver, e.g. v1.2.3. They produce the tags 1.2.3, 1.2 and
 # latest. A pre-release such as v1.0.0-rc.1 only gets its exact version tag.
@@ -10,6 +10,11 @@ name: Release image
 on:
   release:
     types: [published]
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - .github/workflows/release-image.yml
   workflow_dispatch:
 
 permissions:
@@ -18,7 +23,7 @@ permissions:
 
 concurrency:
   group: release-image-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   image:
