@@ -82,3 +82,26 @@ it('synchronously stores events on the sync endpoint', function () {
         'status_code' => 200,
     ]);
 });
+
+it('rate limits the legacy ingest endpoints per project', function () {
+    Queue::fake();
+    config()->set('watch.ingest.rate_limit_per_minute', 2);
+
+    Project::factory()->withApiKey('pk_test_limited')->create();
+    Project::factory()->withApiKey('pk_test_other')->create();
+
+    $payload = ['events' => [['type' => 'request', 'data' => ['request_id' => (string) Str::uuid()]]]];
+
+    $this->withHeader('Authorization', 'Bearer pk_test_limited')->postJson('/api/ingest', $payload)->assertStatus(202);
+    $this->withHeader('Authorization', 'Bearer pk_test_limited')->postJson('/api/ingest', $payload)->assertStatus(202);
+
+    $response = $this->withHeader('Authorization', 'Bearer pk_test_limited')
+        ->postJson('/api/ingest/sync', $payload)
+        ->assertStatus(429)
+        ->assertExactJson(['error' => 'Too many requests.'])
+        ->assertHeader('Retry-After');
+
+    expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(0)->toBeLessThanOrEqual(60);
+
+    $this->withHeader('Authorization', 'Bearer pk_test_other')->postJson('/api/ingest', $payload)->assertStatus(202);
+});
