@@ -78,4 +78,4 @@ For anything that fails or needs explanation, see [doc/install.md](doc/install.m
 
 ## License
 
-MIT.
+Watch Tower is open-source software licensed under the [MIT license](LICENSE). It is a fork of [AmadulHaque/watch-tower](https://github.com/AmadulHaque/watch-tower).
