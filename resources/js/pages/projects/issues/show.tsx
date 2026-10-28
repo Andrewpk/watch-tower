@@ -10,6 +10,7 @@ import {
     Folder,
     LinkIcon,
     MoreHorizontal,
+    RotateCcw,
     Sparkles,
     UserCircle2,
 } from 'lucide-react';
@@ -823,41 +824,56 @@ function ActivitySection({
                     </div>
                 </li>
 
-                {issue.comments.map((comment) => (
-                    <li key={comment.id} className="flex items-start gap-3">
-                        <Avatar name={comment.user?.name ?? '?'} />
-                        <div className="flex-1 rounded-lg border border-border bg-card">
-                            <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs">
-                                <span>
-                                    <span className="font-medium text-foreground">
-                                        {comment.user?.name ?? 'Unknown'}
-                                    </span>{' '}
-                                    <span className="text-muted-foreground">
-                                        commented ·{' '}
-                                        {formatRelative(comment.created_at)}
+                {issue.comments.map((comment) =>
+                    comment.type === 'regression' ? (
+                        <li key={comment.id} className="flex items-start gap-3">
+                            <span className="grid h-7 w-7 place-items-center rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-300">
+                                <RotateCcw className="h-3 w-3" />
+                            </span>
+                            <div className="text-xs text-muted-foreground">
+                                <span className="font-medium text-foreground">
+                                    Watchtower
+                                </span>{' '}
+                                reopened the issue after the error occurred
+                                again · {formatRelative(comment.created_at)}
+                            </div>
+                        </li>
+                    ) : (
+                        <li key={comment.id} className="flex items-start gap-3">
+                            <Avatar name={comment.user?.name ?? '?'} />
+                            <div className="flex-1 rounded-lg border border-border bg-card">
+                                <div className="flex items-center justify-between border-b border-border px-3 py-1.5 text-xs">
+                                    <span>
+                                        <span className="font-medium text-foreground">
+                                            {comment.user?.name ?? 'Unknown'}
+                                        </span>{' '}
+                                        <span className="text-muted-foreground">
+                                            commented ·{' '}
+                                            {formatRelative(comment.created_at)}
+                                        </span>
                                     </span>
-                                </span>
-                                {currentUser &&
-                                    comment.user?.id ===
-                                        Number(currentUser.id) && (
-                                        <button
-                                            type="button"
-                                            onClick={() =>
-                                                deleteComment(comment.id)
-                                            }
-                                            className="text-muted-foreground hover:text-foreground"
-                                            aria-label="Delete comment"
-                                        >
-                                            <MoreHorizontal className="h-3.5 w-3.5" />
-                                        </button>
-                                    )}
+                                    {currentUser &&
+                                        comment.user?.id ===
+                                            Number(currentUser.id) && (
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    deleteComment(comment.id)
+                                                }
+                                                className="text-muted-foreground hover:text-foreground"
+                                                aria-label="Delete comment"
+                                            >
+                                                <MoreHorizontal className="h-3.5 w-3.5" />
+                                            </button>
+                                        )}
+                                </div>
+                                <div className="px-3 py-2 text-sm whitespace-pre-wrap">
+                                    {comment.body}
+                                </div>
                             </div>
-                            <div className="px-3 py-2 text-sm whitespace-pre-wrap">
-                                {comment.body}
-                            </div>
-                        </div>
-                    </li>
-                ))}
+                        </li>
+                    ),
+                )}
             </ul>
 
             <div className="flex items-start gap-3">

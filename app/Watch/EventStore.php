@@ -125,10 +125,7 @@ class EventStore
                 ->first();
 
             if ($group) {
-                $group->forceFill([
-                    'total_count' => $group->total_count + 1,
-                    'last_occurrence_at' => $occurredAt,
-                ])->save();
+                $this->recordRecurrence($group, $occurredAt);
             } else {
                 $nextDisplayNumber = (int) (ErrorGroup::where('project_id', $project->id)->max('display_number') ?? 0) + 1;
 
@@ -234,6 +231,51 @@ class EventStore
             'environment' => $this->stringOrNull($data['environment'] ?? null),
             'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
         ]);
+    }
+
+    /**
+     * Count another occurrence against an existing error group.
+     *
+     * The counter is bumped with a single atomic UPDATE and `last_occurrence_at`
+     * never moves backwards, so out-of-order events cannot rewind it. A resolved
+     * group is reopened and the regression is logged on its timeline, while an
+     * ignored group keeps its status.
+     */
+    private function recordRecurrence(ErrorGroup $group, CarbonImmutable $occurredAt): void
+    {
+        $attributes = [];
+
+        if ($group->last_occurrence_at === null || $occurredAt->greaterThan($group->last_occurrence_at)) {
+            $attributes['last_occurrence_at'] = $occurredAt;
+        }
+
+        $regression = null;
+
+        if ($group->status === 'resolved') {
+            $regression = [
+                'previous_status' => 'resolved',
+                'resolved_at' => $group->resolved_at?->toIso8601String(),
+                'resolved_by_user_id' => $group->resolved_by_user_id,
+                'occurred_at' => $occurredAt->toIso8601String(),
+            ];
+
+            $attributes += [
+                'status' => 'unresolved',
+                'resolved_at' => null,
+                'resolved_by_user_id' => null,
+            ];
+        }
+
+        $group->increment('total_count', 1, $attributes);
+
+        if ($regression !== null) {
+            $group->comments()->create([
+                'user_id' => null,
+                'type' => 'regression',
+                'body' => 'Reopened automatically: the error occurred again after it was resolved.',
+                'meta' => $regression,
+            ]);
+        }
     }
 
     /**
