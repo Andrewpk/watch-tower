@@ -312,7 +312,7 @@ function StacktraceCard({ issue }: { issue: Issue }) {
                 await navigator.clipboard.writeText(md);
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1500);
-            } catch (err) {
+            } catch {
                 fallbackCopy(md);
             }
         } else {
@@ -320,7 +320,7 @@ function StacktraceCard({ issue }: { issue: Issue }) {
         }
     };
 
-    const fallbackCopy = (text) => {
+    const fallbackCopy = (text: string) => {
         const textarea = document.createElement('textarea');
         textarea.value = text;
         textarea.style.position = 'fixed'; // avoid scroll jump

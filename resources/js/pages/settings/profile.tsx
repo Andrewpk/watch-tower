@@ -6,7 +6,6 @@ import PasswordController from '@/actions/App/Http/Controllers/Settings/Password
 import ProfileController from '@/actions/App/Http/Controllers/Settings/ProfileController';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
     Select,
     SelectContent,

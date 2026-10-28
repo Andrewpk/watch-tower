@@ -280,10 +280,10 @@ function DurationCard({ detail }: { detail: Detail }) {
                             <Tooltip
                                 cursor={{ strokeDasharray: '3 3' }}
                                 contentStyle={tooltipStyle}
-                                formatter={(value: number | string) =>
+                                formatter={(value) =>
                                     `${Number(value).toFixed(2)} ms`
                                 }
-                                labelFormatter={(value: number | string) =>
+                                labelFormatter={(value) =>
                                     formatStamp(
                                         new Date(Number(value)).toISOString(),
                                     )
