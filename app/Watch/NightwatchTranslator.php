@@ -75,7 +75,8 @@ class NightwatchTranslator
     /**
      * The wire `duration` is in microseconds and is kept as fractional milliseconds: most queries finish in well
      * under a millisecond, and whole-millisecond rounding would store them as 0 (and sum to nothing). `sql` is cut
-     * on a character boundary to the 65,535 bytes the sensor caps text at.
+     * on a character boundary to the 65,535 bytes of our `trace_queries.sql` TEXT column (the sensor itself sends up
+     * to 16 MB), so statements sharing their first 64 KB are grouped together.
      *
      * @param  array<string, mixed>  $r
      * @return array{type: string, id: string, data: array<string, mixed>}
@@ -96,16 +97,17 @@ class NightwatchTranslator
     }
 
     /**
-     * Microseconds to milliseconds with three decimals, matching the `decimal(12,3)` duration columns. Negative
-     * values are clamped to zero; non-numeric input is null.
+     * Microseconds to milliseconds with three decimals, matching the `decimal(12,3)` of `trace_queries.duration_ms`.
+     * Negative values are clamped to zero and huge ones to the column maximum; non-numeric and non-finite input
+     * (such as `1e400`, which casts to INF) is null.
      */
     private function microsToFractionalMillis(mixed $value): ?float
     {
-        if (! is_numeric($value)) {
+        if (! is_numeric($value) || ! is_finite((float) $value)) {
             return null;
         }
 
-        return round(max(0, (float) $value) / 1000, 3);
+        return min(round(max(0, (float) $value) / 1000, 3), 999_999_999.999);
     }
 
     /**

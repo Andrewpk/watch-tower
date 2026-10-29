@@ -141,3 +141,16 @@ it('stores fractional query durations and the trace sum from a Nightwatch batch'
         ->and(Trace::sole()->db_time_ms)->toEqualWithDelta(1.65, 0.0001)
         ->and($summary['totals']['total_ms'])->toEqualWithDelta(1.65, 0.0001);
 });
+
+it('keeps storing queries for a trace whose sum is near the old column limit', function () {
+    // SQLite does not enforce the decimal precision, so this only proves the code path; the widened
+    // decimal(15,3) column is what keeps MySQL strict from rejecting the increment.
+    storeDbTimeQuery($this->project, $this->correlationId, 1.0);
+    Trace::sole()->update(['db_time_ms' => 999_999_998.5]);
+
+    storeDbTimeQuery($this->project, $this->correlationId, 0.75);
+    storeDbTimeQuery($this->project, $this->correlationId, 999_999_999.999);
+
+    expect(TraceQuery::count())->toBe(3)
+        ->and(Trace::sole()->db_time_ms)->toBeGreaterThan(1_999_999_998.0);
+});

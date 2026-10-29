@@ -67,7 +67,9 @@ class EventStore
      * record may have filled in already. `db_time_ms` is the sum of the stored query durations, kept up to date by
      * `storeQuery()`, so it is only written when the record carries it (legacy clients): a request record from
      * Nightwatch has no such field and must not reset what queries that arrived first already added. A legacy client
-     * that sends `db_time_ms` on the request and also sends query records counts that time twice. When the request
+     * that sends `db_time_ms` on the request and also sends query records ends up anywhere between the request's
+     * value X and X plus the query sum: the request record overwrites what earlier queries added, and later queries
+     * add on top. When the request
      * carries a user but no details were known while storing it, the end user is read again afterwards, see
      * `completeUserDetails()`.
      *
@@ -130,7 +132,10 @@ class EventStore
      *
      * A query without any correlation id has no trace to belong to (`trace_id` is required), so it is the only case
      * that is dropped, and it is logged rather than discarded silently. The query's duration is added to the
-     * trace's `db_time_ms` in the same transaction, so the sum always equals the stored query durations.
+     * trace's `db_time_ms` in the same transaction, so the sum always equals the stored query durations. The trace row
+     * is updated before the query row is inserted: the insert takes a shared lock on the parent trace row (foreign
+     * key), and upgrading it to the exclusive lock of an UPDATE afterwards can deadlock on MySQL when two queries of
+     * one request are stored concurrently.
      *
      * @param  array<string, mixed>  $data
      */
@@ -146,9 +151,6 @@ class EventStore
 
         $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
 
-        // The trace row is updated before the query row is inserted: the insert takes a shared lock on the parent
-        // trace row (foreign key), and upgrading it to the exclusive lock of an UPDATE afterwards deadlocks on MySQL
-        // when two queries of one request are stored concurrently.
         DB::transaction(function () use ($trace, $durationMs, $project, $data): void {
             if ($durationMs > 0) {
                 Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);

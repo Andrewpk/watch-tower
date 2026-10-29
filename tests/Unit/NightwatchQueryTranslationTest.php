@@ -45,6 +45,8 @@ it('keeps sub-millisecond durations', function (int|string $micros, float $expec
     'numeric string' => ['2500', 2.5],
     'zero' => [0, 0.0],
     'negative is clamped' => [-5_000, 0.0],
+    'huge value is clamped to the column maximum' => [5_000_000_000_000_000_000, 999_999_999.999],
+    'huge numeric string is clamped' => ['1e30', 999_999_999.999],
 ]);
 
 it('stores a missing or non-numeric duration as null', function (mixed $duration) {
@@ -54,6 +56,10 @@ it('stores a missing or non-numeric duration as null', function (mixed $duration
     'empty string' => [''],
     'text' => ['fast'],
     'array' => [[1_000]],
+    'overflowing numeric string' => ['1e400'],
+    'infinity' => [INF],
+    'negative infinity' => [-INF],
+    'not a number' => [NAN],
 ]);
 
 it('treats a missing duration key as null', function () {
