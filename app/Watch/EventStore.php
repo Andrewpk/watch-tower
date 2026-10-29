@@ -170,15 +170,24 @@ class EventStore
         $occurredAt = $this->parseTimestamp($data['occurred_at'] ?? null);
         $userIdentifier = $this->stringOrNull($data['user_id'] ?? null);
         $userDetails = $this->userDetails($project, $userIdentifier, $data);
+        $isHandled = filter_var($data['is_handled'] ?? $data['handled'] ?? false, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) ?? false;
+        $languageVersion = $this->limitedString($data['language_version'] ?? null, 50);
+        $frameworkVersion = $this->limitedString($data['framework_version'] ?? null, 50);
+        $hostname = $this->limitedString($data['hostname'] ?? null, 255);
+        $release = $this->limitedString($data['release'] ?? null, 255);
 
-        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails) {
+        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release) {
             $group = ErrorGroup::where('project_id', $project->id)
                 ->where('fingerprint', $fingerprint)
                 ->lockForUpdate()
                 ->first();
 
             if ($group) {
-                $this->recordRecurrence($group, $occurredAt);
+                $this->recordRecurrence($group, $occurredAt, [
+                    'is_handled' => $isHandled,
+                    'language_version' => $languageVersion,
+                    'framework_version' => $frameworkVersion,
+                ]);
             } else {
                 $nextDisplayNumber = (int) (ErrorGroup::where('project_id', $project->id)->max('display_number') ?? 0) + 1;
 
@@ -190,6 +199,9 @@ class EventStore
                     'first_message' => $message,
                     'first_file' => $file,
                     'first_line' => $line,
+                    'is_handled' => $isHandled,
+                    'language_version' => $languageVersion,
+                    'framework_version' => $frameworkVersion,
                     'total_count' => 1,
                     'first_occurrence_at' => $occurredAt,
                     'last_occurrence_at' => $occurredAt,
@@ -210,8 +222,12 @@ class EventStore
                 'user_email' => $userDetails['user_email'] ?? null,
                 'file' => $file,
                 'line' => $line,
+                'is_handled' => $isHandled,
                 'environment' => $this->stringOrNull($data['environment'] ?? null),
-                'release_version' => $this->stringOrNull($data['release'] ?? null),
+                'release_version' => $release,
+                'language_version' => $languageVersion,
+                'framework_version' => $frameworkVersion,
+                'hostname' => $hostname,
                 'context' => $data['context'] ?? null,
                 'occurred_at' => $occurredAt,
             ]);
@@ -676,13 +692,25 @@ class EventStore
      * the occurrence happened after it was resolved; an older event that was
      * still queued when the fix shipped is counted but leaves the group
      * resolved. An ignored group keeps its status.
+     *
+     * The group's handled flag and runtime versions follow its newest occurrence ("latest wins"): they are applied
+     * only together with `last_occurrence_at`, and a version the occurrence did not report keeps the stored one.
+     *
+     * @param  array{is_handled: bool, language_version: string|null, framework_version: string|null}  $latestDetails
      */
-    private function recordRecurrence(ErrorGroup $group, CarbonImmutable $occurredAt): void
+    private function recordRecurrence(ErrorGroup $group, CarbonImmutable $occurredAt, array $latestDetails): void
     {
         $attributes = [];
 
         if ($group->last_occurrence_at === null || $occurredAt->greaterThan($group->last_occurrence_at)) {
             $attributes['last_occurrence_at'] = $occurredAt;
+            $attributes['is_handled'] = $latestDetails['is_handled'];
+
+            foreach (['language_version', 'framework_version'] as $column) {
+                if ($latestDetails[$column] !== null) {
+                    $attributes[$column] = $latestDetails[$column];
+                }
+            }
         }
 
         $regression = null;
@@ -715,6 +743,18 @@ class EventStore
                 'meta' => $regression,
             ]);
         }
+    }
+
+    /**
+     * A scalar as a string cut to the column length; null for non-scalars and empty values.
+     */
+    private function limitedString(mixed $value, int $length): ?string
+    {
+        if (! is_scalar($value) || $value === '') {
+            return null;
+        }
+
+        return mb_substr((string) $value, 0, $length);
     }
 
     /**
