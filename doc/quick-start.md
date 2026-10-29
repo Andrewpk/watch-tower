@@ -77,11 +77,14 @@ Run these in **your app's** folder, not in Watch Tower.
    composer require laravel/nightwatch
    ```
 
-2. Add the API key from step 3 to your app's `.env`:
+2. Add the API key from step 3 to your app's `.env`, and send your logs to Nightwatch:
 
    ```env
    NIGHTWATCH_TOKEN=paste-the-api-key-here
+   LOG_STACK=single,nightwatch
    ```
+
+   `LOG_STACK` keeps your usual log file and also sends logs to Watch Tower. It needs `LOG_CHANNEL=stack`, the Laravel default. Exceptions are sent without any extra setup.
 
 3. Point Nightwatch at Watch Tower. In `app/Providers/AppServiceProvider.php`, add this line to `boot()`:
 
@@ -124,6 +127,7 @@ Done. Watch Tower is running and your app is connected.
 | `curl` cannot connect | Run `docker logs watch-tower` and read the last lines. |
 | Agent prints `Authentication failed` | The key or the URL is wrong. Check `NIGHTWATCH_TOKEN` and the URL in `AppServiceProvider`. Rotate the key if you lost it. |
 | Agent runs but never prints `Ingest successful` | Open a page in your app. Check that `NIGHTWATCH_ENABLED` is not `false` in your app's `.env`. |
+| No entries on the **Logs** page | Check that your app's `.env` has `LOG_CHANNEL=stack` and that `LOG_STACK` includes `nightwatch`. On Laravel 10, add `nightwatch` to the `stack` channel in `config/logging.php`. |
 | Banner about queued jobs or retention | Run `docker logs watch-tower`. The worker or the scheduler is failing. |
 
 More settings and fixes: [Docker reference](docker.md).
@@ -135,7 +139,8 @@ More settings and fixes: [Docker reference](docker.md).
 1. **Pin a version.** Replace `latest` with a release tag such as `1.2.3`. `latest` can be a pre-release.
 2. **Use HTTPS.** Put a reverse proxy in front, set `APP_URL` to the public `https://` URL, and set `TRUSTED_PROXIES`. See [Behind a reverse proxy](docker.md#behind-a-reverse-proxy).
 3. **Keep the agent running** in your app with a process manager such as Supervisor. See the [Nightwatch docs](https://nightwatch.laravel.com/docs/start-guide).
-4. **Back up** `watch-tower.env` and the `watch-tower-storage` volume. The volume holds all your data. A new `APP_KEY` logs everyone out.
+4. **Limit log volume.** Every log line becomes a database row. Set `NIGHTWATCH_LOG_LEVEL=warning` in your app to send only warnings and errors.
+5. **Back up** `watch-tower.env` and the `watch-tower-storage` volume. The volume holds all your data. A new `APP_KEY` logs everyone out.
 
 ---
 
