@@ -627,15 +627,6 @@ class NightwatchTranslator
         return ! in_array($op, ['write-failure', 'delete-failure', 'write-failed', 'delete-failed', 'forget-failed', 'failed'], true);
     }
 
-    private function microsToMillis(mixed $value): ?int
-    {
-        if ($value === null || $value === '') {
-            return null;
-        }
-
-        return (int) round(((int) $value) / 1000);
-    }
-
     private function bytesToKilobytes(mixed $value): ?int
     {
         if (! is_numeric($value)) {
