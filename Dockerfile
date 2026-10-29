@@ -9,6 +9,11 @@
 #
 # The base image runs as the unprivileged www-data user, serves on port 8080
 # and keeps the app in /var/www/html. See https://serversideup.net/open-source/docker-php/docs
+#
+# supervisord is the container's main process. It runs three programs: the web
+# server, the queue worker and the scheduler. RUN_QUEUE_WORKER=false and
+# RUN_SCHEDULER=false turn the last two off for setups that run them in
+# containers of their own.
 
 ARG PHP_IMAGE=serversideup/php:8.4-frankenphp-trixie-v5.0.2@sha256:a535961aa62a118860292b3b04f689ee56a07f47938a614660e67fe98ff6853f
 ARG NODE_IMAGE=node:24-bookworm-slim
@@ -67,6 +72,13 @@ FROM ${PHP_IMAGE} AS runtime
 
 USER root
 
+# supervisord (Debian's supervisor package, which pulls in python3) runs the web
+# server, the queue worker and the scheduler; see /etc/supervisor/watch-tower.conf.
+# Not version-pinned, so rebuilds pick up Debian security updates.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
 # Runs before the base image's Laravel automations (50-*). Makes sure the
 # storage tree and the default SQLite file exist, so a freshly mounted empty
 # volume works. Sourced by the entrypoint, so it must stay POSIX sh.
@@ -94,6 +106,135 @@ if ! prepare_storage; then
 fi
 EOF
 
+COPY --chmod=644 <<'EOF' /etc/supervisor/watch-tower.conf
+; Process manager for the Watch Tower image (see doc/docker.md).
+;
+; Runs the web server, the queue worker and the scheduler in one container.
+; RUN_QUEUE_WORKER=false and RUN_SCHEDULER=false stop the last two from
+; starting, for setups that run them in containers of their own. The image
+; sets both to true; each must be true or false.
+;
+; The three programs form one group, so SIGTERM stops them in parallel.
+; Inspect with: supervisorctl -c /etc/supervisor/watch-tower.conf status
+
+[supervisord]
+nodaemon=true
+logfile=/dev/null
+logfile_maxbytes=0
+pidfile=/tmp/supervisord.pid
+childlogdir=/tmp
+
+; The socket permissions (0700, owner only) are the real protection. The fixed
+; credentials only stop supervisord from logging a CRIT about an open socket.
+[unix_http_server]
+file=/tmp/supervisor.sock
+chmod=0700
+username=watch-tower
+password=watch-tower
+
+[rpcinterface:supervisor]
+supervisor.rpcinterface_factory=supervisor.rpcinterface:make_main_rpcinterface
+
+[supervisorctl]
+serverurl=unix:///tmp/supervisor.sock
+username=watch-tower
+password=watch-tower
+
+[group:watch-tower]
+programs=web,queue-worker,scheduler
+priority=100
+
+[program:web]
+command=frankenphp run --config /etc/frankenphp/Caddyfile --adapter caddyfile
+directory=/var/www/html
+priority=10
+autostart=true
+autorestart=true
+startsecs=3
+startretries=3
+stopsignal=TERM
+stopwaitsecs=20
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+; The worker needs the database schema (it reads the cache table on start), and
+; AUTORUN_ENABLED is off by default, so a new container has none until the
+; operator runs the migrations. Wait for them instead of crashing into FATAL.
+; `migrate:status --pending=1` exits 1 while migrations are pending or the
+; database is unreachable.
+[program:queue-worker]
+command=sh -c 'until php /var/www/html/artisan migrate:status --pending=1 >/dev/null 2>&1; do sleep 10; done; exec php /var/www/html/artisan queue:work --tries=3 --sleep=3 --max-time=3600 --memory=128'
+directory=/var/www/html
+priority=20
+autostart=%(ENV_RUN_QUEUE_WORKER)s
+autorestart=true
+startsecs=5
+startretries=100
+stopsignal=TERM
+stopwaitsecs=85
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+[program:scheduler]
+command=php /var/www/html/artisan schedule:work --whisper
+directory=/var/www/html
+priority=30
+autostart=%(ENV_RUN_SCHEDULER)s
+autorestart=true
+startsecs=5
+startretries=100
+stopsignal=TERM
+stopwaitsecs=20
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+[eventlistener:exit-on-fatal]
+command=/usr/local/bin/watch-tower-exit-on-fatal
+events=PROCESS_STATE_FATAL
+priority=1
+autorestart=true
+startretries=100
+stdout_logfile=NONE
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+EOF
+
+# Supervisor event listener. supervisord gives up on a program that keeps
+# failing to start (FATAL) but keeps running itself. When that program is the
+# web server, stop supervisord so the container exits and the platform's
+# restart policy starts a fresh one. A dead worker or scheduler is only logged:
+# the admin warnings report it, and restarting would not fix its cause.
+COPY --chmod=755 <<'EOF' /usr/local/bin/watch-tower-exit-on-fatal
+#!/bin/sh
+while :; do
+    printf 'READY\n'
+    IFS= read -r header || exit 0
+    payload=$(head -c "${header##*len:}")
+    case "$payload" in
+        "processname:web "*)
+            echo "watch-tower: supervisord gave up on the web server ($payload). Stopping the container." >&2
+            kill -TERM "$PPID"
+            ;;
+        *)
+            echo "watch-tower: supervisord gave up on a program ($payload). The container keeps running." >&2
+            ;;
+    esac
+    printf 'RESULT 2\nOK'
+done
+EOF
+
 USER www-data
 WORKDIR /var/www/html
 
@@ -108,6 +249,10 @@ WORKDIR /var/www/html
 # SQLite: WAL lets reads run while a write is in progress, and the busy timeout
 # makes a second writer wait up to 5 seconds instead of failing with
 # "database is locked" during bursts of ingest.
+#
+# Set RUN_QUEUE_WORKER and RUN_SCHEDULER to false on the web container when the
+# worker and scheduler run in containers of their own. They have no effect when
+# CMD is overridden.
 ENV APP_ENV=production \
     APP_DEBUG=false \
     LOG_CHANNEL=stderr \
@@ -117,7 +262,9 @@ ENV APP_ENV=production \
     DB_BUSY_TIMEOUT=5000 \
     HEALTHCHECK_PATH=/up \
     PHP_OPCACHE_ENABLE=1 \
-    TELESCOPE_ENABLED=false
+    TELESCOPE_ENABLED=false \
+    RUN_QUEUE_WORKER=true \
+    RUN_SCHEDULER=true
 
 # By default the base image's Caddy replaces REMOTE_ADDR with a client IP taken
 # from CF-Connecting-IP or X-Forwarded-For whenever the peer has a private or
@@ -130,3 +277,5 @@ COPY --from=build --chown=www-data:www-data /var/www/html/vendor ./vendor
 COPY --from=build --chown=www-data:www-data /dist ./
 
 EXPOSE 8080
+
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/watch-tower.conf"]

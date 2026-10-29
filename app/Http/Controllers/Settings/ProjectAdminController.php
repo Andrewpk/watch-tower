@@ -7,6 +7,7 @@ use App\Jobs\DeleteProjectData;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
+use App\Watch\MaintenanceStatus;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,13 +29,13 @@ class ProjectAdminController extends Controller
     public const ROTATION_GRACE_HOURS = [0, 1, 24, 168];
 
     /**
-     * List the projects.
+     * List the projects, with when retention last ran.
      *
      * A key flashed by `store()` or `rotateKey()` is handed to the page as
      * Inertia flash data, which, unlike a prop, is kept out of the browser's
      * history state, so Back or a session restore cannot show the key again.
      */
-    public function index(Request $request): Response
+    public function index(Request $request, MaintenanceStatus $maintenance): Response
     {
         $newApiKey = $this->pullNewApiKey($request);
 
@@ -65,8 +66,14 @@ class ProjectAdminController extends Controller
                 'created_at' => $project->created_at?->toISOString(),
             ]);
 
+        $lastPrune = $maintenance->lastPrune();
+
         return Inertia::render('settings/projects/index', [
             'projects' => $projects,
+            'lastPrune' => $lastPrune ? [
+                'finished_at' => $lastPrune->finished_at->toISOString(),
+                'rows_deleted' => $lastPrune->rows_deleted,
+            ] : null,
         ]);
     }
 

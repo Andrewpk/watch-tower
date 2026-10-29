@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { ComponentType, ReactNode } from 'react';
 
+import { MaintenanceBanner } from '@/components/maintenance-banner';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
@@ -128,7 +129,10 @@ export function SettingsShell({ children }: SettingsShellProps) {
                 </div>
             </aside>
 
-            <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+            <main className="flex min-w-0 flex-1 flex-col">
+                <MaintenanceBanner />
+                {children}
+            </main>
         </div>
     );
 }

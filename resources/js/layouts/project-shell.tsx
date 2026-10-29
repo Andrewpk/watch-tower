@@ -23,6 +23,7 @@ import {
 import { useEffect, useState } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 
+import { MaintenanceBanner } from '@/components/maintenance-banner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -213,6 +214,7 @@ export function ProjectShell({
             </aside>
 
             <main className="flex min-w-0 flex-1 flex-col bg-muted/30">
+                <MaintenanceBanner />
                 {children}
             </main>
         </div>

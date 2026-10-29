@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Models\MaintenanceRun;
 use App\Models\Project;
 use App\Watch\TelemetryPruner;
 use Illuminate\Console\Attributes\Description;
@@ -19,6 +20,10 @@ use Illuminate\Console\Command;
  * `total_count` therefore stays a lifetime count and can be larger than the
  * number of occurrences still retained. Issue comments and statuses survive
  * with their group.
+ *
+ * A finished run over every project (not a dry run, not `--project`) is
+ * recorded in `maintenance_runs`. The admin warning for a scheduler that is
+ * not running reads that record.
  */
 #[Signature('watch:prune
     {--project= : Only prune the project with this slug}
@@ -54,6 +59,7 @@ class PruneTelemetry extends Command
             return self::FAILURE;
         }
 
+        $startedAt = now();
         $pruner = new TelemetryPruner($chunkSize);
         $total = 0;
 
@@ -78,6 +84,10 @@ class PruneTelemetry extends Command
             );
 
             $total += array_sum($perTable);
+        }
+
+        if (! $dryRun && ! $slug) {
+            MaintenanceRun::recordFinished(MaintenanceRun::TASK_PRUNE, $startedAt, $total);
         }
 
         $this->components->info($dryRun
