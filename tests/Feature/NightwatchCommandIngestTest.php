@@ -23,7 +23,7 @@ function commandIngestRecord(array $overrides, CarbonImmutable $at): array
         'v' => 1,
         't' => 'command',
         'timestamp' => $at->getTimestamp() + 0.25,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1.example.test',
         'trace_id' => (string) Str::uuid(),
         'name' => 'app:sync-users',
@@ -39,7 +39,7 @@ function scheduledTaskIngestRecord(array $overrides, CarbonImmutable $at): array
         'v' => 1,
         't' => 'scheduled-task',
         'timestamp' => $at->getTimestamp() + 0.25,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1.example.test',
         'trace_id' => (string) Str::uuid(),
         'name' => 'php artisan app:prune',
@@ -68,7 +68,7 @@ it('stores command runs sent through the Nightwatch endpoint', function () {
         ->and($runs[0]->duration_ms)->toBe(1250)
         ->and($runs[0]->arguments)->toBe(['42'])
         ->and($runs[0]->options)->toBe(['--force'])
-        ->and($runs[0]->environment)->toBe('production')
+        ->and($runs[0]->environment)->toBeNull()
         ->and($runs[1]->status)->toBe('failed')
         ->and($runs[1]->exit_code)->toBe(1)
         ->and($runs[1]->duration_ms)->toBe(500);

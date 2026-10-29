@@ -9,7 +9,7 @@ function commandWireRecord(array $overrides = []): array
         'v' => 1,
         't' => 'command',
         'timestamp' => CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp() + 0.123456,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1.example.test',
         'trace_id' => '11111111-2222-3333-4444-555555555555',
         'class' => 'App\\Console\\Commands\\SyncUsers',
@@ -26,7 +26,7 @@ function scheduledTaskWireRecord(array $overrides = []): array
         'v' => 1,
         't' => 'scheduled-task',
         'timestamp' => CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp() + 0.5,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1.example.test',
         'trace_id' => '66666666-7777-8888-9999-000000000000',
         'name' => 'php artisan app:prune',
@@ -54,9 +54,9 @@ it('translates a successful command', function () {
             'status' => 'completed',
             'exit_code' => 0,
             'duration_ms' => 1250,
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
-        ]);
+        ])
+        ->and($event['data'])->not->toHaveKey('environment');
 });
 
 it('marks a command with a non-zero exit code as failed', function (int $exitCode) {
@@ -116,9 +116,9 @@ it('translates a processed scheduled task', function () {
             'schedule' => '0 * * * *',
             'status' => 'processed',
             'duration_ms' => 2500,
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
-        ]);
+        ])
+        ->and($event['data'])->not->toHaveKey('environment');
 });
 
 it('keeps the failed status of a scheduled task', function () {

@@ -38,7 +38,7 @@ it('queues a translated request record', function () {
         'duration' => 125000, // microseconds
         'ip' => '203.0.113.4',
         'server' => 'web-1',
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'user' => '42',
         'queries' => 3,
         'peak_memory_usage' => 4194304, // 4 MB
@@ -79,7 +79,7 @@ it('queues a translated cache-event record', function () {
         'v' => 1,
         't' => 'cache-event',
         'timestamp' => 1778755417.835628,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1',
         '_group' => 'group-hash',
         'trace_id' => 'trace-cache-1',
@@ -104,7 +104,7 @@ it('queues a translated cache-event record', function () {
             && $job->event['data']['operation'] === 'write'
             && $job->event['data']['succeeded'] === true
             && $job->event['data']['duration_ms'] === 3
-            && $job->event['data']['environment'] === 'production'
+            && ! array_key_exists('environment', $job->event['data'])
             && $job->event['data']['request_id'] === 'trace-cache-1';
     });
 });
@@ -117,7 +117,7 @@ it('queues a translated log record', function () {
         'v' => 1,
         't' => 'log',
         'timestamp' => 1778754766.635732,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1',
         'trace_id' => 'trace-log-1',
         'execution_source' => 'request',
@@ -141,7 +141,7 @@ it('queues a translated log record', function () {
             && $job->event['data']['source_label'] === 'GET /home'
             && $job->event['data']['user_name'] === 'amal'
             && $job->event['data']['context'] === ['foo' => 'bar']
-            && $job->event['data']['environment'] === 'production'
+            && ! array_key_exists('environment', $job->event['data'])
             && $job->event['data']['request_id'] === 'trace-log-1';
     });
 });
