@@ -190,12 +190,12 @@ it('purges within a deadline and reports whether it finished', function () {
 
     expect($late['finished'])->toBeFalse()
         ->and(array_sum($late['deleted']))->toBe(0)
-        ->and(remainingProjectRows($this->project))->toBe(13 + 1);
+        ->and(remainingProjectRows($this->project))->toBe(14 + 1);
 
     $unlimited = $pruner->purge($this->project->id, deadline: microtime(true) + 60);
 
     expect($unlimited['finished'])->toBeTrue()
-        ->and(array_sum($unlimited['deleted']))->toBe(14)
+        ->and(array_sum($unlimited['deleted']))->toBe(15)
         ->and(remainingProjectRows($this->project))->toBe(0);
 });
 
