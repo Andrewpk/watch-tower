@@ -42,6 +42,7 @@ type Detail = {
     hash: string;
     connection: string | null;
     connection_types: string[];
+    locations_total: number;
     locations: {
         file: string;
         line: number | null;
@@ -118,7 +119,10 @@ export default function QueryShow({ detail, selectedRange }: Props) {
                     <SqlCard sql={detail.sql} connection={detail.connection} />
                 </div>
 
-                <LocationsCard locations={detail.locations} />
+                <LocationsCard
+                    locations={detail.locations}
+                    total={detail.locations_total}
+                />
             </div>
         </AppLayout>
     );
@@ -376,34 +380,57 @@ function InfoCard({ detail }: { detail: Detail }) {
                         </div>
                         <ul className="space-y-1.5 text-xs">
                             {detail.calls.slice(0, 6).map((call) => (
-                                <li
-                                    key={call.id}
-                                    className="flex items-center justify-between gap-3 font-mono"
-                                >
-                                    <span className="text-muted-foreground">
-                                        {formatStamp(call.occurred_at)}
-                                    </span>
-                                    <span className="flex items-center gap-2">
-                                        {call.is_slow ? (
-                                            <Badge
-                                                variant="warning"
-                                                className="px-1.5 py-0 text-[9px]"
-                                            >
-                                                slow
-                                            </Badge>
-                                        ) : null}
-                                        {call.is_n_plus_one ? (
-                                            <Badge
-                                                variant="destructive"
-                                                className="px-1.5 py-0 text-[9px]"
-                                            >
-                                                N+1
-                                            </Badge>
-                                        ) : null}
-                                        <span className="tabular-nums">
-                                            {formatMs(call.duration_ms)}
+                                <li key={call.id} className="font-mono">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-muted-foreground">
+                                            {formatStamp(call.occurred_at)}
                                         </span>
-                                    </span>
+                                        <span className="flex items-center gap-2">
+                                            {call.is_slow ? (
+                                                <Badge
+                                                    variant="warning"
+                                                    className="px-1.5 py-0 text-[9px]"
+                                                >
+                                                    slow
+                                                </Badge>
+                                            ) : null}
+                                            {call.is_n_plus_one ? (
+                                                <Badge
+                                                    variant="destructive"
+                                                    className="px-1.5 py-0 text-[9px]"
+                                                >
+                                                    N+1
+                                                </Badge>
+                                            ) : null}
+                                            <span className="tabular-nums">
+                                                {formatMs(call.duration_ms)}
+                                            </span>
+                                        </span>
+                                    </div>
+                                    {call.file || call.connection_type ? (
+                                        <div className="mt-0.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                                            <span
+                                                className="min-w-0 truncate"
+                                                title={formatLocation(
+                                                    call.file,
+                                                    call.line,
+                                                )}
+                                            >
+                                                {formatLocation(
+                                                    call.file,
+                                                    call.line,
+                                                )}
+                                            </span>
+                                            {call.connection_type ? (
+                                                <Badge
+                                                    variant="muted"
+                                                    className="shrink-0 px-1.5 py-0 text-[9px]"
+                                                >
+                                                    {call.connection_type}
+                                                </Badge>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                 </li>
                             ))}
                         </ul>
@@ -414,11 +441,22 @@ function InfoCard({ detail }: { detail: Detail }) {
     );
 }
 
-function LocationsCard({ locations }: { locations: Detail['locations'] }) {
+function LocationsCard({
+    locations,
+    total,
+}: {
+    locations: Detail['locations'];
+    total: number;
+}) {
     return (
         <Card>
-            <CardHeader className="pb-3">
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle>Locations</CardTitle>
+                {total > locations.length ? (
+                    <span className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Showing {locations.length} of {formatNumber(total)}
+                    </span>
+                ) : null}
             </CardHeader>
             <Separator />
             <CardContent className="p-0">
@@ -447,9 +485,10 @@ function LocationsCard({ locations }: { locations: Detail['locations'] }) {
                                     key={`${location.file}:${location.line}`}
                                 >
                                     <TableCell className="py-2 font-mono text-xs">
-                                        {location.line === null
-                                            ? location.file
-                                            : `${location.file}:${location.line}`}
+                                        {formatLocation(
+                                            location.file,
+                                            location.line,
+                                        )}
                                     </TableCell>
                                     <TableCell className="py-2 text-right tabular-nums">
                                         {formatNumber(location.total)}
@@ -731,6 +770,14 @@ function InfoRow({
             </dd>
         </div>
     );
+}
+
+function formatLocation(file: string | null, line: number | null): string {
+    if (file === null) {
+        return '';
+    }
+
+    return line === null ? file : `${file}:${line}`;
 }
 
 function formatNumber(value: number): string {

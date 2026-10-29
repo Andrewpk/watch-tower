@@ -7,6 +7,7 @@ use App\Models\TraceQuery;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 
 class QueryStats
 {
@@ -22,8 +23,8 @@ class QueryStats
         int $page,
         int $perPage,
     ): LengthAwarePaginator {
-        return StatsPaginator::paginate(
-            items: $this->queries($project, $range, $search),
+        $paginator = StatsPaginator::paginate(
+            items: $this->queries($project, $range, $search, withLocations: false),
             sortable: [
                 'sql' => 'string',
                 'connection' => 'string',
@@ -36,6 +37,11 @@ class QueryStats
             dir: $dir ?? 'desc',
             page: $page,
             perPage: $perPage,
+        );
+
+        // Locations are looked up for the statements on this page only, which bounds the cost by the page size.
+        return $paginator->setCollection(
+            collect($this->withLocations($project, $range, $search, array_values($paginator->items()))),
         );
     }
 
@@ -78,7 +84,7 @@ class QueryStats
     /**
      * @return list<array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null,location:string|null,locations_count:int}>
      */
-    public function queries(Project $project, TimeRange $range, ?string $search = null): array
+    public function queries(Project $project, TimeRange $range, ?string $search = null, bool $withLocations = true): array
     {
         $base = $this->baseQuery($project, $range);
 
@@ -96,13 +102,11 @@ class QueryStats
             ->get();
 
         $durationsBySql = $this->durationsBySql($project, $range, $search);
-        $locationsBySql = $this->locationsBySql($project, $range, $search);
 
-        return $rows
-            ->map(function ($row) use ($durationsBySql, $locationsBySql) {
+        $items = $rows
+            ->map(function ($row) use ($durationsBySql) {
                 $sql = (string) $row->sql;
                 $durations = $durationsBySql[$sql] ?? [];
-                $locations = $locationsBySql[$sql] ?? [];
 
                 return [
                     'hash' => sha1($sql),
@@ -112,13 +116,15 @@ class QueryStats
                     'total_ms' => (float) $row->total_ms,
                     'avg_ms' => $row->avg_ms !== null ? (float) $row->avg_ms : null,
                     'p95_ms' => $this->percentile($durations, 0.95),
-                    'location' => $locations === [] ? null : $this->formatLocation($locations[0]['file'], $locations[0]['line']),
-                    'locations_count' => count($locations),
+                    'location' => null,
+                    'locations_count' => 0,
                 ];
             })
             ->sortByDesc('total_ms')
             ->values()
             ->all();
+
+        return $withLocations ? $this->withLocations($project, $range, $search, $items) : $items;
     }
 
     /**
@@ -128,6 +134,7 @@ class QueryStats
      *   connection:string|null,
      *   connection_types: list<string>,
      *   locations: list<array{file:string,line:int|null,total:int,total_ms:float,avg_ms:float|null}>,
+     *   locations_total: int,
      *   totals: array{total:int,total_ms:float,min_ms:float|null,max_ms:float|null,avg_ms:float|null,p95_ms:float|null},
      *   buckets: list<array{bucket:string,count:int,avg_duration:float|null,p95_duration:float|null}>,
      *   calls: list<array{id:string,duration_ms:float,row_count:int|null,file:string|null,line:int|null,connection_type:string|null,is_slow:bool,is_n_plus_one:bool,occurred_at:string|null}>
@@ -167,13 +174,20 @@ class QueryStats
             ->map(fn ($value) => (string) $value)
             ->all();
 
-        $locations = TraceQuery::query()
+        $locationGroups = TraceQuery::query()
             ->where('project_id', $project->id)
             ->where('sql', $sql)
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->whereNotNull('file')
-            ->selectRaw('file, line, COUNT(*) AS total, SUM(duration_ms) AS total_ms, AVG(duration_ms) AS avg_ms')
-            ->groupBy('file', 'line')
+            ->select('file', 'line')
+            ->groupBy('file', 'line');
+
+        $locationsTotal = DB::query()->fromSub((clone $locationGroups)->toBase(), 'location_groups')->count();
+
+        $locations = (clone $locationGroups)
+            ->selectRaw('COUNT(*) AS total')
+            ->selectRaw('SUM(duration_ms) AS total_ms')
+            ->selectRaw('AVG(duration_ms) AS avg_ms')
             ->orderByDesc('total')
             ->orderBy('file')
             ->orderBy('line')
@@ -214,6 +228,7 @@ class QueryStats
             'connection' => $connection !== null ? (string) $connection : null,
             'connection_types' => $connectionTypes,
             'locations' => $locations,
+            'locations_total' => $locationsTotal,
             'totals' => $summary['totals'],
             'buckets' => $summary['buckets'],
             'calls' => $calls,
@@ -307,14 +322,40 @@ class QueryStats
     }
 
     /**
-     * The code locations each statement ran from, most called first. Statements from sensors that do not report a
-     * location are left out.
+     * Set the most called location and the number of locations on the given statements.
      *
+     * @param  list<array<string, mixed>>  $items
+     * @return list<array<string, mixed>>
+     */
+    private function withLocations(Project $project, TimeRange $range, ?string $search, array $items): array
+    {
+        $locationsBySql = $this->locationsBySql($project, $range, $search, array_column($items, 'sql'));
+
+        return array_map(function (array $item) use ($locationsBySql): array {
+            $locations = $locationsBySql[$item['sql']] ?? [];
+
+            return [
+                ...$item,
+                'location' => $locations === [] ? null : $this->formatLocation($locations[0]['file'], $locations[0]['line']),
+                'locations_count' => count($locations),
+            ];
+        }, $items);
+    }
+
+    /**
+     * The code locations the given statements ran from, most called first. Statements from sensors that do not
+     * report a location are left out.
+     *
+     * @param  list<string>  $statements
      * @return array<string, list<array{file:string,line:int|null,total:int}>>
      */
-    private function locationsBySql(Project $project, TimeRange $range, ?string $search): array
+    private function locationsBySql(Project $project, TimeRange $range, ?string $search, array $statements): array
     {
-        $query = $this->baseQuery($project, $range)->whereNotNull('file');
+        if ($statements === []) {
+            return [];
+        }
+
+        $query = $this->baseQuery($project, $range)->whereNotNull('file')->whereIn('sql', $statements);
 
         if ($search !== null && $search !== '') {
             $query->where('sql', 'like', '%'.$search.'%');

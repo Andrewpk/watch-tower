@@ -154,8 +154,9 @@ class EventStore
         }
 
         $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
+        $file = $this->limitedString($data['file'] ?? null, 255);
 
-        DB::transaction(function () use ($trace, $durationMs, $project, $data): void {
+        DB::transaction(function () use ($trace, $durationMs, $file, $project, $data): void {
             if ($durationMs > 0) {
                 Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);
             }
@@ -167,8 +168,8 @@ class EventStore
                 'sql' => (string) ($data['sql'] ?? ''),
                 'bindings' => $data['bindings'] ?? null,
                 'connection_name' => $this->stringOrNull($data['connection'] ?? null),
-                'file' => $this->limitedString($data['file'] ?? null, 255),
-                'line' => $this->unsignedIntOrNull($data['line'] ?? null),
+                'file' => $file,
+                'line' => $file === null ? null : ($this->unsignedIntOrNull($data['line'] ?? null) ?: null),
                 'connection_type' => $this->limitedString($data['connection_type'] ?? null, 10),
                 'duration_ms' => $durationMs,
                 'row_count' => $this->intOrNull($data['row_count'] ?? null),
@@ -369,7 +370,7 @@ class EventStore
      * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
      * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. Per-attempt metrics (the lazy
      * load and hydrated model counts) follow the same rule, and an attempt that does not carry them leaves the stored
-     * values alone.
+     * values alone: a newer attempt without counts keeps the previous attempt's values.
      *
      * @param  array<string, mixed>  $data
      */

@@ -453,7 +453,8 @@ class NightwatchTranslator
 
     /**
      * Like unsignedCount(), but a missing or non-numeric value is null rather than 0: a record from an older sensor
-     * that does not report the count must not be stored as having none.
+     * that does not report the count must not be stored as having none. A negative count is clamped to 0 here,
+     * while the legacy ingest path stores it as null.
      */
     private function unsignedCountOrNull(mixed $value): ?int
     {

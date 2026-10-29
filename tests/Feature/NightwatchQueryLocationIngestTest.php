@@ -248,15 +248,79 @@ it('keeps the counts when the same attempt is delivered again without them', fun
         ->and($job->hydrated_models)->toBe(40);
 });
 
+it('keeps the counts of the previous attempt when a newer attempt does not carry them', function () {
+    ($this->send)(locationIngestJobAttempt($this->now, ['status' => 'released', 'lazy_loads' => 4, 'hydrated_models' => 40]));
+    ($this->send)(locationIngestJobAttempt($this->now->addSeconds(30), [
+        'attempt_id' => '33333333-3333-4333-8333-333333333332',
+        'attempt' => 2,
+    ]));
+
+    $job = QueueJobRun::sole();
+
+    expect($job->attempts)->toBe(2)
+        ->and($job->status)->toBe('completed')
+        ->and($job->lazy_loads)->toBe(4)
+        ->and($job->hydrated_models)->toBe(40);
+});
+
 it('keeps the counts when a queued record arrives after the attempt', function () {
     ($this->send)(locationIngestJobAttempt($this->now, ['lazy_loads' => 4, 'hydrated_models' => 40]));
-    ($this->send)(locationIngestQueuedJob($this->now->subSeconds(5), ['lazy_loads' => 99, 'hydrated_models' => 99]));
+    ($this->send)(locationIngestQueuedJob($this->now->subSeconds(5)));
 
     $job = QueueJobRun::sole();
 
     expect($job->lazy_loads)->toBe(4)
         ->and($job->hydrated_models)->toBe(40)
         ->and($job->dispatched_at)->not->toBeNull();
+});
+
+it('does not let a legacy job record with counts overwrite the counts of an attempt', function () {
+    $project = Project::factory()->withApiKey('pk_test_legacy_job')->create();
+
+    postNightwatchRecords([locationIngestJobAttempt($this->now, ['lazy_loads' => 4, 'hydrated_models' => 40])], ingestToken($project->id))->assertOk();
+
+    $this->withHeader('Authorization', 'Bearer pk_test_legacy_job')
+        ->postJson('/api/ingest/sync', [
+            'events' => [
+                ['type' => 'job', 'data' => [
+                    'job_id' => '22222222-2222-4222-8222-222222222222',
+                    'class' => 'App\\Jobs\\SendInvoice',
+                    'dispatched_at' => $this->now->subSeconds(5)->toIso8601String(),
+                    'lazy_loads' => 99,
+                    'hydrated_models' => 99,
+                ]],
+            ],
+        ])
+        ->assertOk();
+
+    $job = QueueJobRun::sole();
+
+    expect($job->lazy_loads)->toBe(4)
+        ->and($job->hydrated_models)->toBe(40)
+        ->and($job->dispatched_at)->not->toBeNull();
+});
+
+it('stores no line for line 0 or a line without a file from the legacy sync endpoint', function () {
+    $project = Project::factory()->withApiKey('pk_test_legacy_line')->create();
+    $correlationId = (string) Str::uuid();
+
+    $this->withHeader('Authorization', 'Bearer pk_test_legacy_line')
+        ->postJson('/api/ingest/sync', [
+            'events' => [
+                ['type' => 'query', 'data' => ['request_id' => $correlationId, 'sql' => 'select 1', 'file' => 'app/Models/User.php', 'line' => 0]],
+                ['type' => 'query', 'data' => ['request_id' => $correlationId, 'sql' => 'select 2', 'line' => 42]],
+                ['type' => 'query', 'data' => ['request_id' => $correlationId, 'sql' => 'select 3', 'file' => 'app/Models/User.php', 'line' => 42]],
+            ],
+        ])
+        ->assertOk();
+
+    $queries = TraceQuery::where('project_id', $project->id)->orderBy('sql')->get();
+
+    expect($queries[0]->file)->toBe('app/Models/User.php')
+        ->and($queries[0]->line)->toBeNull()
+        ->and($queries[1]->file)->toBeNull()
+        ->and($queries[1]->line)->toBeNull()
+        ->and($queries[2]->line)->toBe(42);
 });
 
 it('drops invalid location and counts from the legacy sync endpoint instead of failing', function () {
@@ -312,48 +376,86 @@ it('drops invalid location and counts from the legacy sync endpoint instead of f
 
 it('returns the most called location of each query from the stats', function () {
     $traceId = (string) Str::uuid();
+    $checkout = ['file' => 'app/Services/CheckoutService.php', 'line' => 12];
 
     ($this->send)(
+        locationIngestQuery($this->now, $traceId, $checkout),
+        locationIngestQuery($this->now, $traceId, $checkout),
         locationIngestQuery($this->now, $traceId),
-        locationIngestQuery($this->now, $traceId),
-        locationIngestQuery($this->now, $traceId, ['file' => 'app/Services/CheckoutService.php', 'line' => 12]),
         locationIngestQuery($this->now, $traceId, ['sql' => 'select 1', 'file' => '', 'line' => 0, 'connection_type' => '']),
     );
 
     $rows = collect((new QueryStats)->queries($this->project, $this->range))->keyBy('sql');
 
-    expect($rows['select * from `orders` where `user_id` = ?']['location'])->toBe('app/Http/Controllers/OrderController.php:42')
+    expect($rows['select * from `orders` where `user_id` = ?']['location'])->toBe('app/Services/CheckoutService.php:12')
         ->and($rows['select * from `orders` where `user_id` = ?']['locations_count'])->toBe(2)
         ->and($rows['select 1']['location'])->toBeNull()
         ->and($rows['select 1']['locations_count'])->toBe(0);
 });
 
+it('looks up locations for the statements of the requested page only', function () {
+    $traceId = (string) Str::uuid();
+
+    ($this->send)(
+        locationIngestQuery($this->now, $traceId, ['sql' => 'select slow', 'duration' => 9_000_000, 'file' => 'app/Jobs/SyncInventory.php', 'line' => 5]),
+        locationIngestQuery($this->now, $traceId, ['sql' => 'select fast', 'duration' => 1_000, 'file' => 'app/Models/User.php', 'line' => 9]),
+    );
+
+    $stats = new QueryStats;
+    $firstPage = $stats->paginatedQueries($this->project, $this->range, null, 'total_ms', 'desc', 1, 1);
+    $secondPage = $stats->paginatedQueries($this->project, $this->range, null, 'total_ms', 'desc', 2, 1);
+
+    expect($firstPage->total())->toBe(2)
+        ->and($firstPage->items()[0]['sql'])->toBe('select slow')
+        ->and($firstPage->items()[0]['location'])->toBe('app/Jobs/SyncInventory.php:5')
+        ->and($secondPage->items()[0]['sql'])->toBe('select fast')
+        ->and($secondPage->items()[0]['location'])->toBe('app/Models/User.php:9');
+});
+
 it('groups the calls of a query by file and line in the detail', function () {
     $traceId = (string) Str::uuid();
     $sql = 'select * from `orders` where `user_id` = ?';
+    $checkout = ['file' => 'app/Services/CheckoutService.php', 'line' => 12, 'connection_type' => 'write'];
 
     ($this->send)(
-        locationIngestQuery($this->now, $traceId, ['duration' => 1_000]),
-        locationIngestQuery($this->now, $traceId, ['duration' => 3_000]),
-        locationIngestQuery($this->now, $traceId, ['file' => 'app/Services/CheckoutService.php', 'line' => 12, 'connection_type' => 'write']),
+        locationIngestQuery($this->now, $traceId, $checkout + ['duration' => 1_000]),
+        locationIngestQuery($this->now, $traceId, $checkout + ['duration' => 3_000]),
+        locationIngestQuery($this->now, $traceId),
         locationIngestQuery($this->now, $traceId, ['file' => '', 'line' => 0, 'connection_type' => '']),
     );
 
     $detail = (new QueryStats)->queryDetail($this->project, $this->range, sha1($sql));
 
     expect($detail['locations'])->toHaveCount(2)
+        ->and($detail['locations_total'])->toBe(2)
         ->and($detail['locations'][0])->toBe([
-            'file' => 'app/Http/Controllers/OrderController.php',
-            'line' => 42,
+            'file' => 'app/Services/CheckoutService.php',
+            'line' => 12,
             'total' => 2,
             'total_ms' => 4.0,
             'avg_ms' => 2.0,
         ])
-        ->and($detail['locations'][1]['file'])->toBe('app/Services/CheckoutService.php')
+        ->and($detail['locations'][1]['file'])->toBe('app/Http/Controllers/OrderController.php')
         ->and($detail['connection_types'])->toBe(['read', 'write'])
         ->and($detail['calls'])->toHaveCount(4)
         ->and(collect($detail['calls'])->pluck('file')->filter()->unique()->sort()->values()->all())
         ->toBe(['app/Http/Controllers/OrderController.php', 'app/Services/CheckoutService.php']);
+});
+
+it('lists at most 20 locations of a query and reports the total', function () {
+    $traceId = (string) Str::uuid();
+    $records = [];
+
+    foreach (range(1, 25) as $line) {
+        $records[] = locationIngestQuery($this->now, $traceId, ['line' => $line]);
+    }
+
+    ($this->send)(...$records);
+
+    $detail = (new QueryStats)->queryDetail($this->project, $this->range, sha1('select * from `orders` where `user_id` = ?'));
+
+    expect($detail['locations'])->toHaveCount(20)
+        ->and($detail['locations_total'])->toBe(25);
 });
 
 it('renders the query pages with the location', function () {
