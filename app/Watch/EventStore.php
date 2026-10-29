@@ -7,6 +7,9 @@ use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\EventOccurrence;
 use App\Models\LogEntry;
+use App\Models\MailSend;
+use App\Models\NotificationSend;
+use App\Models\OutgoingRequest;
 use App\Models\Project;
 use App\Models\QueueJobRun;
 use App\Models\Trace;
@@ -285,19 +288,87 @@ class EventStore
     private function storeScheduledTask(Project $project, array $data): void {}
 
     /**
+     * Persist a sent mail against its trace, which is created as a stub if the request record has not arrived yet.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeMail(Project $project, array $data): void {}
+    private function storeMail(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        MailSend::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'mailable_class' => $this->stringOrNull($data['class'] ?? $data['mailable_class'] ?? null) ?? 'UnknownMailable',
+            'mailer' => $this->stringOrNull($data['mailer'] ?? null),
+            'subject' => $this->stringOrNull($data['subject'] ?? null),
+            'recipients_count' => (int) ($data['recipients_count'] ?? 0),
+            'attachments_count' => (int) ($data['attachments_count'] ?? 0),
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'sent',
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private function storeNotification(Project $project, array $data): void {}
+    private function storeNotification(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        NotificationSend::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'notification_class' => $this->stringOrNull($data['class'] ?? $data['notification_class'] ?? null) ?? 'UnknownNotification',
+            'channel' => $this->stringOrNull($data['channel'] ?? null) ?? 'unknown',
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'sent',
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private function storeOutgoingRequest(Project $project, array $data): void {}
+    private function storeOutgoingRequest(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        OutgoingRequest::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'method' => strtoupper($this->stringOrNull($data['method'] ?? null) ?? 'GET'),
+            'host' => (string) ($data['host'] ?? ''),
+            'url' => (string) ($data['url'] ?? ''),
+            'status_code' => $this->intOrNull($data['status_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'request_size_bytes' => $this->intOrNull($data['request_size_bytes'] ?? null),
+            'response_size_bytes' => $this->intOrNull($data['response_size_bytes'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
+
+    /**
+     * The `source_*` columns shared by mail, notification and outgoing request rows.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{source_type: string|null, source_id: string|null, source_label: string|null}
+     */
+    private function sourceAttributes(array $data): array
+    {
+        return [
+            'source_type' => $this->stringOrNull($data['source_type'] ?? null),
+            'source_id' => $this->stringOrNull($data['source_id'] ?? null),
+            'source_label' => $this->stringOrNull($data['source_label'] ?? null),
+        ];
+    }
 
     /**
      * @param  array<string, mixed>  $data
