@@ -101,6 +101,7 @@ class ExceptionsController extends Controller
                 'laravel_versions' => $detail['laravel_versions'],
                 'impacted_users' => $detail['impacted_users'],
                 'servers' => $detail['servers'],
+                'first_release' => $detail['first_release'],
                 'environments' => $detail['environments'],
                 'occurrences' => $detail['occurrences'],
                 'totals_in_range' => [

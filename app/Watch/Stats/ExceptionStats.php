@@ -83,7 +83,7 @@ class ExceptionStats
         $groups = $query->get();
 
         return $groups
-            ->map(function (ErrorGroup $group) use ($occurrenceCounts) {
+            ->map(function (ErrorGroup $group) use ($occurrenceCounts, $handled) {
                 $stats = $occurrenceCounts->get($group->id);
 
                 return [
@@ -97,7 +97,7 @@ class ExceptionStats
                         : null,
                     'total_count' => (int) ($stats?->total ?? 0),
                     'users_count' => (int) ($stats?->users_count ?? 0),
-                    'is_handled' => (bool) $group->is_handled,
+                    'is_handled' => $handled ?? (bool) $group->is_handled,
                 ];
             })
             ->sortByDesc('last_occurrence_at')
@@ -106,6 +106,9 @@ class ExceptionStats
     }
 
     /**
+     * `first_release` is the release of the oldest retained occurrence that has one; older occurrences may already
+     * have been pruned.
+     *
      * @return array{
      *   last_seen: string|null,
      *   first_seen: string|null,
@@ -113,6 +116,7 @@ class ExceptionStats
      *   laravel_versions: list<string>,
      *   impacted_users: int,
      *   servers: list<string>,
+     *   first_release: string|null,
      *   environments: list<array{environment:string,count:int}>,
      *   occurrences: array{day:int, week:int, month:int}
      * }
@@ -140,17 +144,32 @@ class ExceptionStats
             ])
             ->all();
 
-        $servers = (clone $base)
+        $traceServers = (clone $base)
             ->join('traces', 'error_occurrences.trace_id', '=', 'traces.id')
             ->whereNotNull('traces.hostname')
             ->distinct()
-            ->pluck('traces.hostname')
+            ->pluck('traces.hostname');
+
+        $occurrenceServers = (clone $base)
+            ->whereNotNull('error_occurrences.hostname')
+            ->distinct()
+            ->pluck('error_occurrences.hostname');
+
+        $servers = $occurrenceServers
+            ->merge($traceServers)
             ->filter()
+            ->unique()
             ->values()
             ->all();
 
-        $phpVersions = $group->language_version ? [$group->language_version] : [];
-        $laravelVersions = $group->framework_version ? [$group->framework_version] : [];
+        $phpVersions = $this->recentVersions($base, 'language_version', $group->language_version);
+        $laravelVersions = $this->recentVersions($base, 'framework_version', $group->framework_version);
+
+        $firstRelease = (clone $base)
+            ->whereNotNull('release_version')
+            ->orderBy('occurred_at')
+            ->orderBy('id')
+            ->value('release_version');
 
         $first = $group->first_occurrence_at?->toIso8601String();
         $last = $group->last_occurrence_at?->toIso8601String();
@@ -166,6 +185,7 @@ class ExceptionStats
             'laravel_versions' => $laravelVersions,
             'impacted_users' => $impactedUsers,
             'servers' => $servers,
+            'first_release' => $firstRelease,
             'environments' => $environments,
             'occurrences' => [
                 'day' => $day,
@@ -173,6 +193,31 @@ class ExceptionStats
                 'month' => $month,
             ],
         ];
+    }
+
+    /**
+     * Distinct non-null values of a version column, the most recently seen first (at most ten). Falls back to the
+     * group's own value when no occurrence carries one, e.g. for occurrences stored before the column existed.
+     *
+     * @param  Builder<ErrorOccurrence>  $base
+     * @return list<string>
+     */
+    private function recentVersions(Builder $base, string $column, ?string $groupValue): array
+    {
+        $versions = (clone $base)
+            ->whereNotNull($column)
+            ->groupBy($column)
+            ->selectRaw("{$column} AS version, MAX(occurred_at) AS last_seen")
+            ->orderByDesc('last_seen')
+            ->limit(10)
+            ->pluck('version')
+            ->all();
+
+        if ($versions === [] && $groupValue) {
+            return [$groupValue];
+        }
+
+        return $versions;
     }
 
     /**
