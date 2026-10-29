@@ -17,6 +17,13 @@ use Illuminate\Support\Facades\Log;
 
 class EventStore
 {
+    /**
+     * Every event type the store accepts; shared with the legacy ingest request validation.
+     *
+     * @var list<string>
+     */
+    public const TYPES = ['request', 'query', 'exception', 'event', 'job', 'job-attempt', 'log', 'cache-event', 'command', 'scheduled-task', 'mail', 'notification', 'outgoing-request', 'user'];
+
     public function __construct(private readonly Fingerprinter $fingerprinter) {}
 
     /**
@@ -32,8 +39,15 @@ class EventStore
             'exception' => $this->storeException($project, $event['data']),
             'event' => $this->storeEvent($project, $event['data']),
             'job' => $this->storeJob($project, $event['data']),
+            'job-attempt' => $this->storeJobAttempt($project, $event['data']),
             'log' => $this->storeLog($project, $event['data']),
             'cache-event' => $this->storeCacheEvent($project, $event['data']),
+            'command' => $this->storeCommand($project, $event['data']),
+            'scheduled-task' => $this->storeScheduledTask($project, $event['data']),
+            'mail' => $this->storeMail($project, $event['data']),
+            'notification' => $this->storeNotification($project, $event['data']),
+            'outgoing-request' => $this->storeOutgoingRequest($project, $event['data']),
+            'user' => $this->storeUser($project, $event['data']),
             default => null,
         };
     }
@@ -254,6 +268,41 @@ class EventStore
             'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
         ]);
     }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeJobAttempt(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeCommand(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeScheduledTask(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeMail(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeNotification(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeOutgoingRequest(Project $project, array $data): void {}
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function storeUser(Project $project, array $data): void {}
 
     /**
      * Count another occurrence against an existing error group.

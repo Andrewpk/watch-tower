@@ -26,8 +26,15 @@ class NightwatchTranslator
             'query' => $this->translateQuery($record),
             'exception' => $this->translateException($record),
             'queued-job' => $this->translateQueuedJob($record),
+            'job-attempt' => $this->translateJobAttempt($record),
             'log' => $this->translateLog($record),
             'cache-event' => $this->translateCacheEvent($record),
+            'command' => $this->translateCommand($record),
+            'scheduled-task' => $this->translateScheduledTask($record),
+            'mail' => $this->translateMail($record),
+            'notification' => $this->translateNotification($record),
+            'outgoing-request' => $this->translateOutgoingRequest($record),
+            'user' => $this->translateUser($record),
             default => null,
         };
     }
@@ -172,6 +179,69 @@ class NightwatchTranslator
         ];
     }
 
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateJobAttempt(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateCommand(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateScheduledTask(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateMail(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateNotification(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateOutgoingRequest(array $r): ?array
+    {
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     */
+    private function translateUser(array $r): ?array
+    {
+        return null;
+    }
+
     private function normalizeCacheOperation(mixed $value): string
     {
         $op = is_string($value) ? strtolower($value) : '';
@@ -249,5 +319,19 @@ class NightwatchTranslator
         }
 
         return (string) $value;
+    }
+
+    /**
+     * Stringify a scalar and cut it to the column length; non-scalars become null.
+     */
+    private function limit(mixed $value, int $length): ?string
+    {
+        if (! is_scalar($value)) {
+            return null;
+        }
+
+        $string = $this->stringOrNull($value);
+
+        return $string === null ? null : mb_substr($string, 0, $length);
     }
 }
