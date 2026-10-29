@@ -95,6 +95,10 @@ class EventStore
             ...$userDetails,
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
             'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
+            ...array_filter([
+                'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'memory_used_kb' => $this->intOrNull($data['memory_used_kb'] ?? null),
             'memory_peak_kb' => $this->intOrNull($data['memory_peak_kb'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
@@ -166,8 +170,9 @@ class EventStore
         }
 
         $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
+        $file = $this->limitedString($data['file'] ?? null, 255);
 
-        DB::transaction(function () use ($trace, $durationMs, $project, $data): void {
+        DB::transaction(function () use ($trace, $durationMs, $file, $project, $data): void {
             if ($durationMs > 0) {
                 Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);
             }
@@ -179,6 +184,9 @@ class EventStore
                 'sql' => (string) ($data['sql'] ?? ''),
                 'bindings' => $data['bindings'] ?? null,
                 'connection_name' => $this->stringOrNull($data['connection'] ?? null),
+                'file' => $file,
+                'line' => $file === null ? null : ($this->unsignedIntOrNull($data['line'] ?? null) ?: null),
+                'connection_type' => $this->limitedString($data['connection_type'] ?? null, 10),
                 'duration_ms' => $durationMs,
                 'row_count' => $this->intOrNull($data['row_count'] ?? null),
                 'is_n_plus_one' => (bool) ($data['is_n_plus_one'] ?? false),
@@ -376,7 +384,9 @@ class EventStore
      * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
      *
      * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
-     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row.
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. Per-attempt metrics (the lazy
+     * load and hydrated model counts) follow the same rule, and an attempt that does not carry them leaves the stored
+     * values alone: a newer attempt without counts keeps the previous attempt's values.
      *
      * @param  array<string, mixed>  $data
      */
@@ -393,6 +403,10 @@ class EventStore
             'completed_at' => $this->parseTimestamp($data['completed_at'] ?? null, allowNull: true),
             'failed_at' => $this->parseTimestamp($data['failed_at'] ?? null, allowNull: true),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...array_filter([
+                'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'exception' => $data['exception'] ?? null,
         ];
 
@@ -486,6 +500,8 @@ class EventStore
             'command' => $this->stringOrNull($data['command'] ?? null) ?? 'unknown',
             'arguments' => is_array($data['arguments'] ?? null) ? $data['arguments'] : null,
             'options' => is_array($data['options'] ?? null) ? $data['options'] : null,
+            'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+            'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
             'status' => $this->stringOrNull($data['status'] ?? null) ?? 'completed',
             'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
@@ -513,6 +529,8 @@ class EventStore
             'project_id' => $project->id,
             'task' => $task,
             'task_hash' => $suppliedHash !== null && preg_match('/^[0-9a-f]{40}$/i', $suppliedHash) ? $suppliedHash : sha1($task),
+            'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+            'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
             'schedule' => $this->stringOrNull($data['schedule'] ?? null),
             'schedule_summary' => $this->stringOrNull($data['schedule_summary'] ?? null),
             'next_run_at' => $this->parseTimestamp($data['next_run_at'] ?? null, allowNull: true),

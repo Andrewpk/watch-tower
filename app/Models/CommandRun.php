@@ -12,6 +12,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'command',
     'arguments',
     'options',
+    'lazy_loads',
+    'hydrated_models',
     'status',
     'exit_code',
     'duration_ms',
@@ -31,6 +33,8 @@ class CommandRun extends Model
         return [
             'arguments' => 'array',
             'options' => 'array',
+            'lazy_loads' => 'integer',
+            'hydrated_models' => 'integer',
             'exit_code' => 'integer',
             'duration_ms' => 'integer',
             'bootstrap_ms' => 'float',

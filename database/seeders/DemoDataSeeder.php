@@ -128,6 +128,7 @@ class DemoDataSeeder extends Seeder
                 'user_name' => $endUser['name'] ?? null,
                 'duration_ms' => $duration,
                 'db_queries_count' => random_int(0, 18),
+                ...$this->modelCounts(),
                 'db_time_ms' => random_int(0, max(1, (int) ($duration / 3))),
                 'memory_used_kb' => random_int(2_048, 32_768),
                 'memory_peak_kb' => random_int(4_096, 65_536),
@@ -562,6 +563,7 @@ class DemoDataSeeder extends Seeder
                     'sql' => $template['sql'],
                     'bindings' => json_encode([]),
                     'connection_name' => $template['connection'],
+                    ...$this->queryLocation($template),
                     'duration_ms' => round($duration, 3),
                     'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                     'is_n_plus_one' => $totalCalls > 1200 && random_int(1, 4) === 1,
@@ -593,6 +595,7 @@ class DemoDataSeeder extends Seeder
                 'sql' => $template['sql'],
                 'bindings' => json_encode([]),
                 'connection_name' => $template['connection'],
+                ...$this->queryLocation($template),
                 'duration_ms' => round($duration, 3),
                 'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                 'is_n_plus_one' => false,
@@ -611,6 +614,49 @@ class DemoDataSeeder extends Seeder
         if ($rows !== []) {
             TraceQuery::query()->insert($rows);
         }
+    }
+
+    /**
+     * Lazy load and hydrated model counts for one run; about a quarter of the runs have lazy loads.
+     *
+     * @return array{lazy_loads: int, hydrated_models: int}
+     */
+    private function modelCounts(): array
+    {
+        $lazyLoads = random_int(1, 4) === 1 ? random_int(1, 40) : 0;
+
+        return [
+            'lazy_loads' => $lazyLoads,
+            'hydrated_models' => $lazyLoads + random_int(0, 250),
+        ];
+    }
+
+    /**
+     * Where a query template ran from: each template gets two or three fixed call sites, picked at random per call,
+     * and `read` or `write` as its connection type.
+     *
+     * @param  array{sql: string, type: string}  $template
+     * @return array{file: string, line: int, connection_type: string}
+     */
+    private function queryLocation(array $template): array
+    {
+        $files = [
+            'app/Http/Controllers/OrderController.php',
+            'app/Http/Controllers/ProductController.php',
+            'app/Services/CheckoutService.php',
+            'app/Jobs/SyncInventory.php',
+            'app/Models/User.php',
+            'app/Console/Commands/PruneRecords.php',
+        ];
+
+        $seed = crc32($template['sql']);
+        $site = random_int(0, 1 + $seed % 2);
+
+        return [
+            'file' => $files[($seed + $site) % count($files)],
+            'line' => 20 + (($seed >> 3) + $site * 37) % 180,
+            'connection_type' => $template['type'] === 'select' ? 'read' : 'write',
+        ];
     }
 
     /**
@@ -692,6 +738,7 @@ class DemoDataSeeder extends Seeder
                 'failed_at' => $failedAt,
                 'duration_ms' => $status === 'queued' ? null : $duration,
                 'attempts' => $status === 'failed' ? random_int(2, 3) : ($status === 'queued' ? 0 : 1),
+                ...($status === 'queued' ? ['lazy_loads' => null, 'hydrated_models' => null] : $this->modelCounts()),
                 'status' => $status,
                 'payload' => json_encode([]),
                 'user_identifier' => $jobUser['id'] ?? null,
@@ -750,6 +797,7 @@ class DemoDataSeeder extends Seeder
                 'command' => $tpl['command'],
                 'arguments' => json_encode([]),
                 'options' => json_encode(['--quiet' => false]),
+                ...$this->modelCounts(),
                 'status' => $status,
                 'exit_code' => $exitCode,
                 'duration_ms' => $duration,
@@ -860,6 +908,7 @@ class DemoDataSeeder extends Seeder
                     'project_id' => $project->id,
                     'task' => $tpl['task'],
                     'task_hash' => $hash,
+                    ...($status === 'skipped' ? ['lazy_loads' => null, 'hydrated_models' => null] : $this->modelCounts()),
                     'schedule' => $tpl['schedule'],
                     'schedule_summary' => $tpl['schedule_summary'],
                     'next_run_at' => $tpl['next_run_at'],

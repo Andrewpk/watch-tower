@@ -22,6 +22,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'failed_at',
     'duration_ms',
     'attempts',
+    'lazy_loads',
+    'hydrated_models',
     'status',
     'payload',
     'user_identifier',
@@ -44,6 +46,8 @@ class QueueJobRun extends Model
             'failed_at' => 'datetime',
             'duration_ms' => 'integer',
             'attempts' => 'integer',
+            'lazy_loads' => 'integer',
+            'hydrated_models' => 'integer',
             'payload' => 'array',
             'exception' => 'array',
         ];
