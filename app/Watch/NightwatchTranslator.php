@@ -232,7 +232,6 @@ class NightwatchTranslator
     {
         $traceId = (string) ($r['trace_id'] ?? '');
         $status = $this->limit($r['status'] ?? null, 50) ?? 'processed';
-        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
 
         return [
             'type' => 'scheduled-task',
