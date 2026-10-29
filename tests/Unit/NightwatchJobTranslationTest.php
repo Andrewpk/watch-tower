@@ -40,10 +40,10 @@ it('translates a processed job attempt', function () {
             'attempts' => 1,
             'duration_ms' => 1250,
             'user_id' => '42',
-            'environment' => 'production',
             'exception' => null,
             'failed_at' => null,
         ])
+        ->and($event['data'])->not->toHaveKey('environment')
         ->and(CarbonImmutable::parse($event['data']['started_at'])->toIso8601String())->toBe('2026-07-01T10:15:00+00:00')
         ->and(CarbonImmutable::parse($event['data']['completed_at'])->toIso8601String())->toBe('2026-07-01T10:15:01+00:00');
 });
@@ -91,9 +91,9 @@ it('cuts job attempt strings to their column lengths', function () {
         ->and(mb_strlen($event['data']['job_id']))->toBe(64);
 });
 
-it('cuts a long deploy id to the environment column length', function () {
+it('does not map the deploy id of job records to an environment', function () {
     $translator = new NightwatchTranslator;
-    $deploy = str_repeat('d', 60);
+    $deploy = 'v1.4.2';
 
     $attempt = $translator->translate(nightwatchJobTranslationAttempt(['deploy' => $deploy]));
     $queued = $translator->translate([
@@ -103,8 +103,8 @@ it('cuts a long deploy id to the environment column length', function () {
         'deploy' => $deploy,
     ]);
 
-    expect($attempt['data']['environment'])->toBe(str_repeat('d', 50))
-        ->and($queued['data']['environment'])->toBe(str_repeat('d', 50));
+    expect($attempt['data'])->not->toHaveKey('environment')
+        ->and($queued['data'])->not->toHaveKey('environment');
 });
 
 it('translates a queued job with its job id and user but without a duration', function () {

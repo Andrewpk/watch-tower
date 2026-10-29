@@ -118,7 +118,7 @@ it('stores mail, notification and outgoing request records against the request t
         ->and($mail->source_type)->toBe('request')
         ->and($mail->source_id)->toBe($this->traceId)
         ->and($mail->source_label)->toBe('POST /orders')
-        ->and($mail->environment)->toBe('production');
+        ->and($mail->environment)->toBeNull();
 
     $notification = NotificationSend::sole();
     expect($notification->trace_id)->toBe($trace->id)

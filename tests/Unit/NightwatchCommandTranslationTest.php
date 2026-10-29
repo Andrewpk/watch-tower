@@ -54,9 +54,9 @@ it('translates a successful command', function () {
             'status' => 'completed',
             'exit_code' => 0,
             'duration_ms' => 1250,
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
-        ]);
+        ])
+        ->and($event['data'])->not->toHaveKey('environment');
 });
 
 it('marks a command with a non-zero exit code as failed', function (int $exitCode) {
@@ -116,9 +116,9 @@ it('translates a processed scheduled task', function () {
             'schedule' => '0 * * * *',
             'status' => 'processed',
             'duration_ms' => 2500,
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
-        ]);
+        ])
+        ->and($event['data'])->not->toHaveKey('environment');
 });
 
 it('keeps the failed status of a scheduled task', function () {

@@ -12,6 +12,12 @@ use Illuminate\Support\Str;
  * EventStore consumes.
  *
  * Returns null for record types we don't (yet) persist.
+ *
+ * The wire `deploy` is the deployment id (`nightwatch.deployment`), not an environment name: it is stored as the
+ * release on requests and exceptions, and the wire carries no environment name, so no translation sets one.
+ *
+ * Every string is cut to its column length and non-scalar values are dropped, so one malformed record cannot
+ * fail the whole batch.
  */
 class NightwatchTranslator
 {
@@ -47,24 +53,24 @@ class NightwatchTranslator
      */
     private function translateRequest(array $r): array
     {
-        $traceId = (string) ($r['trace_id'] ?? '');
+        $traceId = $this->limit($r['trace_id'] ?? null, 255) ?? '';
 
         return [
             'type' => 'request',
             'id' => $traceId,
             'data' => [
                 'request_id' => $traceId,
-                'method' => (string) ($r['method'] ?? 'GET'),
-                'uri' => (string) ($r['route_path'] ?? $r['url'] ?? '/'),
-                'status_code' => $this->intOrNull($r['status_code'] ?? null),
-                'user_id' => $this->stringOrNull($r['user'] ?? null),
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'method' => strtoupper($this->limit($r['method'] ?? null, 10) ?? 'GET'),
+                'uri' => mb_substr($this->scalarString($r['route_path'] ?? $r['url'] ?? '/'), 0, 2048),
+                'status_code' => $this->boundedInt($r['status_code'] ?? null, 65535),
+                'user_id' => $this->limit($r['user'] ?? null, 255),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'db_queries_count' => (int) ($r['queries'] ?? 0),
                 'memory_used_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
-                'hostname' => $this->stringOrNull($r['server'] ?? null),
-                'ip_address' => $this->stringOrNull($r['ip'] ?? null),
+                'release' => $this->limit($r['deploy'] ?? null, 255),
+                'hostname' => $this->limit($r['server'] ?? null, 255),
+                'ip_address' => $this->limit($r['ip'] ?? null, 45),
                 'headers' => $this->decodeMaybeJson($r['headers'] ?? null),
                 'request_data' => $this->decodeMaybeJson($r['payload'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
@@ -122,17 +128,16 @@ class NightwatchTranslator
     {
         return [
             'type' => 'job',
-            'id' => (string) ($r['job_id'] ?? ''),
+            'id' => $this->scalarString($r['job_id'] ?? null),
             'data' => [
                 'job_id' => $this->limit($r['job_id'] ?? null, 64),
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'class' => $this->limit($r['name'] ?? null, 255) ?? 'UnknownJob',
                 'queue' => $this->limit($r['queue'] ?? null, 100),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'status' => 'queued',
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'dispatched_at' => $this->timestampToIso($r['timestamp'] ?? null),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
             ],
         ];
     }
@@ -145,16 +150,15 @@ class NightwatchTranslator
     {
         return [
             'type' => 'log',
-            'id' => (string) ($r['trace_id'] ?? ''),
+            'id' => $this->scalarString($r['trace_id'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'level' => (string) ($r['level'] ?? 'info'),
-                'message' => (string) ($r['message'] ?? ''),
-                'source_type' => $this->stringOrNull($r['execution_source'] ?? null),
-                'source_label' => $this->stringOrNull($r['execution_preview'] ?? null),
-                'user_name' => $this->stringOrNull($r['user'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'level' => $this->limit($r['level'] ?? null, 20) ?? 'info',
+                'message' => $this->scalarString($r['message'] ?? null),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
+                'user_name' => $this->limit($r['user'] ?? null, 255),
                 'context' => $this->decodeMaybeJson($r['context'] ?? null),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -168,15 +172,14 @@ class NightwatchTranslator
     {
         return [
             'type' => 'cache-event',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'key' => (string) ($r['key'] ?? ''),
-                'store' => $this->stringOrNull($r['store'] ?? null),
-                'operation' => $this->normalizeCacheOperation($r['type'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'key' => $this->limit($r['key'] ?? null, 255) ?? '',
+                'store' => $this->limit($r['store'] ?? null, 50),
+                'operation' => mb_substr($this->normalizeCacheOperation($r['type'] ?? null), 0, 20),
                 'succeeded' => $this->cacheSucceeded($r),
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -203,10 +206,10 @@ class NightwatchTranslator
 
         return [
             'type' => 'job-attempt',
-            'id' => (string) ($r['attempt_id'] ?? ''),
+            'id' => $this->scalarString($r['attempt_id'] ?? null),
             'data' => [
                 'job_id' => $this->limit($r['job_id'] ?? null, 64),
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'class' => $this->limit($r['name'] ?? null, 255) ?? 'UnknownJob',
                 'queue' => $this->limit($r['queue'] ?? null, 100),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
@@ -218,7 +221,6 @@ class NightwatchTranslator
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 'exception' => $preview === null ? null : ['message' => $preview],
                 'user_id' => $this->limit($r['user'] ?? null, 255),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
             ],
         ];
     }
@@ -253,14 +255,13 @@ class NightwatchTranslator
             'type' => 'command',
             'id' => $traceId,
             'data' => [
-                'request_id' => $this->stringOrNull($traceId),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'command' => $name,
                 'arguments' => $arguments,
                 'options' => $options,
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
                 'exit_code' => $exitCode,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -283,14 +284,13 @@ class NightwatchTranslator
             'type' => 'scheduled-task',
             'id' => $traceId,
             'data' => [
-                'request_id' => $this->stringOrNull($traceId),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'task' => $this->limit($r['name'] ?? null, 255),
                 'task_hash' => $this->scheduledTaskHash($r),
                 'schedule' => $this->limit($r['cron'] ?? null, 255),
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
                 'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -409,9 +409,9 @@ class NightwatchTranslator
     {
         return [
             'type' => 'mail',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownMailable',
                 'mailer' => $this->limit($r['mailer'] ?? null, 50),
                 'subject' => $this->limit($r['subject'] ?? null, 255),
@@ -420,7 +420,6 @@ class NightwatchTranslator
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 ...$this->sourceFields($r),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -434,15 +433,14 @@ class NightwatchTranslator
     {
         return [
             'type' => 'notification',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownNotification',
                 'channel' => $this->limit($this->channelName($r['channel'] ?? null), 50) ?? 'unknown',
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 ...$this->sourceFields($r),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -458,9 +456,9 @@ class NightwatchTranslator
     {
         return [
             'type' => 'outgoing-request',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'method' => strtoupper($this->limit($r['method'] ?? null, 10) ?? 'GET'),
                 'host' => $this->limit($r['host'] ?? null, 255) ?? '',
                 'url' => $this->limit($r['url'] ?? null, 2048) ?? '',
@@ -469,7 +467,6 @@ class NightwatchTranslator
                 'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4294967295),
                 'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4294967295),
                 ...$this->sourceFields($r),
-                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -632,7 +629,7 @@ class NightwatchTranslator
 
     private function stringOrNull(mixed $value): ?string
     {
-        if ($value === null || $value === '') {
+        if (! is_scalar($value) || $value === '') {
             return null;
         }
 

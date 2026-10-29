@@ -52,7 +52,6 @@ it('translates a mail record', function () {
             'source_type' => 'request',
             'source_id' => '4d9a3c1e-0000-4000-8000-000000000001',
             'source_label' => 'POST /orders',
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
         ]);
 });
@@ -112,8 +111,8 @@ it('translates a notification record', function () {
             'source_type' => 'job',
             'source_id' => 'job-uuid',
             'source_label' => 'App\\Jobs\\SendInvoice',
-            'environment' => 'production',
-        ]);
+        ])
+        ->and($event['data'])->not->toHaveKey('environment');
 });
 
 it('cuts a long notification channel to 50 characters', function () {
@@ -159,7 +158,6 @@ it('translates an outgoing request record', function () {
             'source_type' => 'command',
             'source_id' => 'cmd-uuid',
             'source_label' => 'php artisan sync',
-            'environment' => 'production',
             'occurred_at' => '2026-07-01T10:15:00+00:00',
         ]);
 });
@@ -191,21 +189,21 @@ it('drops outgoing request numbers that do not fit their columns', function () {
         ->and($event['data']['response_size_bytes'])->toBeNull();
 });
 
-it('cuts the environment of mail, notification and outgoing request records to 50 characters', function () {
+it('does not map the deploy id of mail, notification and outgoing request records to an environment', function () {
     $translator = new NightwatchTranslator;
-    $deploy = str_repeat('d', 60);
 
     foreach (['mail', 'notification', 'outgoing-request'] as $type) {
         $event = $translator->translate([
             't' => $type,
-            'deploy' => $deploy,
+            'deploy' => 'v1.4.2',
             'class' => 'App\\Thing',
             'channel' => 'mail',
             'host' => 'api.example.com',
             'url' => 'https://api.example.com/',
         ]);
 
-        expect($event['data']['environment'])->toBe(str_repeat('d', 50));
+        expect($event['data'])->not->toHaveKey('environment')
+            ->and($event['data'])->not->toHaveKey('release');
     }
 });
 

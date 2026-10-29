@@ -68,7 +68,7 @@ it('stores command runs sent through the Nightwatch endpoint', function () {
         ->and($runs[0]->duration_ms)->toBe(1250)
         ->and($runs[0]->arguments)->toBe(['42'])
         ->and($runs[0]->options)->toBe(['--force'])
-        ->and($runs[0]->environment)->toBe('production')
+        ->and($runs[0]->environment)->toBeNull()
         ->and($runs[1]->status)->toBe('failed')
         ->and($runs[1]->exit_code)->toBe(1)
         ->and($runs[1]->duration_ms)->toBe(500);

@@ -104,7 +104,7 @@ it('queues a translated cache-event record', function () {
             && $job->event['data']['operation'] === 'write'
             && $job->event['data']['succeeded'] === true
             && $job->event['data']['duration_ms'] === 3
-            && $job->event['data']['environment'] === 'production'
+            && ! array_key_exists('environment', $job->event['data'])
             && $job->event['data']['request_id'] === 'trace-cache-1';
     });
 });
@@ -141,7 +141,7 @@ it('queues a translated log record', function () {
             && $job->event['data']['source_label'] === 'GET /home'
             && $job->event['data']['user_name'] === 'amal'
             && $job->event['data']['context'] === ['foo' => 'bar']
-            && $job->event['data']['environment'] === 'production'
+            && ! array_key_exists('environment', $job->event['data'])
             && $job->event['data']['request_id'] === 'trace-log-1';
     });
 });
