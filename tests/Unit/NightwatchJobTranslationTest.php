@@ -3,7 +3,7 @@
 use App\Watch\NightwatchTranslator;
 use Carbon\CarbonImmutable;
 
-function jobAttemptRecord(array $overrides = []): array
+function nightwatchJobTranslationAttempt(array $overrides = []): array
 {
     return array_merge([
         'v' => 1,
@@ -26,7 +26,7 @@ function jobAttemptRecord(array $overrides = []): array
 }
 
 it('translates a processed job attempt', function () {
-    $event = (new NightwatchTranslator)->translate(jobAttemptRecord());
+    $event = (new NightwatchTranslator)->translate(nightwatchJobTranslationAttempt());
 
     expect($event['type'])->toBe('job-attempt')
         ->and($event['id'])->toBe('33333333-3333-4333-8333-333333333333')
@@ -49,7 +49,7 @@ it('translates a processed job attempt', function () {
 });
 
 it('translates a released job attempt without a finish time', function () {
-    $event = (new NightwatchTranslator)->translate(jobAttemptRecord(['status' => 'released', 'attempt' => 2]));
+    $event = (new NightwatchTranslator)->translate(nightwatchJobTranslationAttempt(['status' => 'released', 'attempt' => 2]));
 
     expect($event['data'])->toMatchArray([
         'status' => 'released',
@@ -60,7 +60,7 @@ it('translates a released job attempt without a finish time', function () {
 });
 
 it('translates a failed job attempt with its exception preview', function () {
-    $event = (new NightwatchTranslator)->translate(jobAttemptRecord([
+    $event = (new NightwatchTranslator)->translate(nightwatchJobTranslationAttempt([
         'status' => 'failed',
         'exception_preview' => 'Connection refused',
     ]));
@@ -72,13 +72,13 @@ it('translates a failed job attempt with its exception preview', function () {
 });
 
 it('treats an empty user as no user', function () {
-    $event = (new NightwatchTranslator)->translate(jobAttemptRecord(['user' => '']));
+    $event = (new NightwatchTranslator)->translate(nightwatchJobTranslationAttempt(['user' => '']));
 
     expect($event['data']['user_id'])->toBeNull();
 });
 
 it('cuts job attempt strings to their column lengths', function () {
-    $event = (new NightwatchTranslator)->translate(jobAttemptRecord([
+    $event = (new NightwatchTranslator)->translate(nightwatchJobTranslationAttempt([
         'queue' => str_repeat('q', 150),
         'connection' => str_repeat('c', 150),
         'name' => str_repeat('n', 400),
@@ -89,6 +89,22 @@ it('cuts job attempt strings to their column lengths', function () {
         ->and(mb_strlen($event['data']['connection']))->toBe(100)
         ->and(mb_strlen($event['data']['class']))->toBe(255)
         ->and(mb_strlen($event['data']['job_id']))->toBe(64);
+});
+
+it('cuts a long deploy id to the environment column length', function () {
+    $translator = new NightwatchTranslator;
+    $deploy = str_repeat('d', 60);
+
+    $attempt = $translator->translate(nightwatchJobTranslationAttempt(['deploy' => $deploy]));
+    $queued = $translator->translate([
+        't' => 'queued-job',
+        'job_id' => '22222222-2222-4222-8222-222222222222',
+        'name' => 'App\\Jobs\\SendInvoice',
+        'deploy' => $deploy,
+    ]);
+
+    expect($attempt['data']['environment'])->toBe(str_repeat('d', 50))
+        ->and($queued['data']['environment'])->toBe(str_repeat('d', 50));
 });
 
 it('translates a queued job with its job id and user but without a duration', function () {

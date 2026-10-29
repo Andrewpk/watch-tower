@@ -130,7 +130,7 @@ class NightwatchTranslator
                 'status' => 'queued',
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'dispatched_at' => $this->timestampToIso($r['timestamp'] ?? null),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
             ],
         ];
     }
@@ -216,7 +216,7 @@ class NightwatchTranslator
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 'exception' => $preview === null ? null : ['message' => $preview],
                 'user_id' => $this->limit($r['user'] ?? null, 255),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
             ],
         ];
     }

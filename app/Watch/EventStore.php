@@ -350,7 +350,7 @@ class EventStore
 
             $this->fillJobRunBlanks($locked, $details);
             $locked->save();
-        });
+        }, attempts: 3);
     }
 
     /**
