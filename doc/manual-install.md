@@ -1,6 +1,8 @@
-# Installation & Setup
+# Manual install
 
-This guide walks you through getting **Watch Tower** running locally — a Laravel 13 + Inertia v3 + React 19 application.
+This guide runs **Watch Tower** from source — a Laravel 13 + Inertia v3 + React 19 application. Use it to develop Watch Tower or to run it without Docker.
+
+Just want to try it? The [quick start](quick-start.md) runs the Docker image in about 10 minutes.
 
 ---
 
@@ -33,7 +35,7 @@ npm -v
 ## 2. Clone the Repository
 
 ```bash
-git clone <your-repo-url> watch-tower
+git clone https://github.com/Andrewpk/watch-tower.git watch-tower
 cd watch-tower
 ```
 

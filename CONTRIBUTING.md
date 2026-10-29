@@ -7,7 +7,7 @@ For a suspected security vulnerability, do not open a public issue. See [SECURIT
 ## Getting started
 
 1. Fork the repository and clone your fork.
-2. Follow [doc/install.md](doc/install.md) to get the app running locally. `composer run setup` does most of it.
+2. Follow [doc/manual-install.md](doc/manual-install.md) to get the app running locally. `composer run setup` does most of it.
 3. Look for an open issue before starting. For anything larger than a small fix, comment on the issue first so we can agree on the approach.
 
 Docker users can see [doc/docker.md](doc/docker.md) for running the release image.
