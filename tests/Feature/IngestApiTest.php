@@ -1,7 +1,10 @@
 <?php
 
 use App\Jobs\ProcessWatchEvent;
+use App\Models\CacheEvent;
+use App\Models\LogEntry;
 use App\Models\Project;
+use App\Watch\EventStore;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 
@@ -104,4 +107,53 @@ it('rate limits the legacy ingest endpoints per project', function () {
     expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(0)->toBeLessThanOrEqual(60);
 
     $this->withHeader('Authorization', 'Bearer pk_test_other')->postJson('/api/ingest', $payload)->assertStatus(202);
+});
+
+it('accepts every ingest event type on the sync endpoint', function (string $type) {
+    $project = Project::factory()->withApiKey('pk_test_types')->create();
+
+    $this->withHeader('Authorization', 'Bearer pk_test_types')
+        ->postJson('/api/ingest/sync', [
+            'events' => [['type' => $type, 'data' => ['request_id' => (string) Str::uuid()]]],
+        ])
+        ->assertOk()
+        ->assertJson(['success' => true, 'events_stored' => 1]);
+})->with(EventStore::TYPES);
+
+it('stores log and cache-event records from the legacy sync endpoint', function () {
+    $project = Project::factory()->withApiKey('pk_test_children')->create();
+    $correlationId = (string) Str::uuid();
+
+    $this->withHeader('Authorization', 'Bearer pk_test_children')
+        ->postJson('/api/ingest/sync', [
+            'events' => [
+                ['type' => 'log', 'data' => ['request_id' => $correlationId, 'level' => 'warning', 'message' => 'Disk almost full']],
+                ['type' => 'cache-event', 'data' => ['request_id' => $correlationId, 'key' => 'users:1', 'operation' => 'hit']],
+            ],
+        ])
+        ->assertOk()
+        ->assertJson(['success' => true, 'events_stored' => 2]);
+
+    $this->assertDatabaseHas('log_entries', [
+        'project_id' => $project->id,
+        'level' => 'warning',
+        'message' => 'Disk almost full',
+    ]);
+    $this->assertDatabaseHas('cache_events', [
+        'project_id' => $project->id,
+        'key' => 'users:1',
+        'operation' => 'hit',
+    ]);
+    expect(LogEntry::count())->toBe(1)->and(CacheEvent::count())->toBe(1);
+});
+
+it('rejects an unknown event type on the sync endpoint', function () {
+    Project::factory()->withApiKey('pk_test_unknown_type')->create();
+
+    $this->withHeader('Authorization', 'Bearer pk_test_unknown_type')
+        ->postJson('/api/ingest/sync', [
+            'events' => [['type' => 'not_a_real_type', 'data' => []]],
+        ])
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['events.0.type']);
 });

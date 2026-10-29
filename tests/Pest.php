@@ -6,8 +6,10 @@ use App\Models\Project;
 use App\Models\Trace;
 use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
 /*
@@ -54,6 +56,49 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+function ingestToken(int|string $projectId, int $expiresInSeconds = 3600): string
+{
+    return Crypt::encryptString(json_encode([
+        'project_id' => $projectId,
+        'expires_at' => time() + $expiresInSeconds,
+    ]));
+}
+
+function postNightwatchRecords(array $records, ?string $token = null, bool $gzip = true): TestResponse
+{
+    $body = json_encode(['records' => $records]);
+    $headers = [
+        'Authorization' => 'Bearer '.($token ?? 'invalid'),
+        'Content-Type' => 'application/json',
+        'Accept' => 'application/json',
+    ];
+
+    if ($gzip) {
+        $body = gzencode($body);
+        $headers['Content-Encoding'] = 'gzip';
+    }
+
+    return test()->call('POST', '/api/nightwatch-ingest', [], [], [], array_merge(
+        ['CONTENT_TYPE' => 'application/json'],
+        collect($headers)->mapWithKeys(fn ($v, $k) => ['HTTP_'.strtoupper(str_replace('-', '_', $k)) => $v])->all(),
+    ), $body);
+}
+
+function postNightwatchBody(string $body, string $token, bool $gzip = true): TestResponse
+{
+    $server = [
+        'CONTENT_TYPE' => 'application/json',
+        'HTTP_AUTHORIZATION' => 'Bearer '.$token,
+        'HTTP_ACCEPT' => 'application/json',
+    ];
+
+    if ($gzip) {
+        $server['HTTP_CONTENT_ENCODING'] = 'gzip';
+    }
+
+    return test()->call('POST', '/api/nightwatch-ingest', [], [], [], $server, $body);
 }
 
 /**

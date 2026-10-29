@@ -2,8 +2,10 @@
 
 namespace App\Http\Requests\Api;
 
+use App\Watch\EventStore;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class IngestBatchRequest extends FormRequest
 {
@@ -24,7 +26,7 @@ class IngestBatchRequest extends FormRequest
             'timestamp' => ['nullable', 'date'],
 
             'events' => ['required', 'array', 'min:1', 'max:1000'],
-            'events.*.type' => ['required', 'string', 'in:request,exception,query,job,event'],
+            'events.*.type' => ['required', 'string', Rule::in(EventStore::TYPES)],
             'events.*.id' => ['nullable', 'string', 'max:64'],
             'events.*.data' => ['required', 'array'],
         ];
