@@ -3,13 +3,18 @@
 namespace App\Watch;
 
 use App\Models\CacheEvent;
+use App\Models\CommandRun;
 use App\Models\EndUser;
 use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\EventOccurrence;
 use App\Models\LogEntry;
+use App\Models\MailSend;
+use App\Models\NotificationSend;
+use App\Models\OutgoingRequest;
 use App\Models\Project;
 use App\Models\QueueJobRun;
+use App\Models\ScheduledTaskRun;
 use App\Models\Trace;
 use App\Models\TraceQuery;
 use Carbon\CarbonImmutable;
@@ -243,15 +248,24 @@ class EventStore
     }
 
     /**
+     * Persist a dispatched (queued) job.
+     *
+     * With a `job_id` the run is keyed on (project, job id) and shared with its attempts: if an attempt record got
+     * here first, the queued record only fills the dispatch details the row lacks and never touches the outcome.
+     * Without a `job_id` (legacy `job` events) every record is its own row.
+     *
      * @param  array<string, mixed>  $data
      */
     private function storeJob(Project $project, array $data): void
     {
         $trace = $this->resolveTrace($project, $data);
 
-        QueueJobRun::create([
+        $jobId = $this->stringOrNull($data['job_id'] ?? null);
+
+        $values = [
             'project_id' => $project->id,
             'trace_id' => $trace?->id,
+            'job_id' => $jobId,
             'job_class' => (string) ($data['class'] ?? $data['job_class'] ?? 'UnknownJob'),
             'queue' => $this->stringOrNull($data['queue'] ?? null),
             'connection' => $this->stringOrNull($data['connection'] ?? null),
@@ -263,9 +277,25 @@ class EventStore
             'attempts' => (int) ($data['attempts'] ?? 0),
             'status' => (string) ($data['status'] ?? 'pending'),
             'payload' => $data['payload'] ?? null,
+            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
             'exception' => $data['exception'] ?? null,
             'environment' => $this->stringOrNull($data['environment'] ?? null),
-        ]);
+        ];
+
+        if ($jobId === null) {
+            QueueJobRun::create($values);
+
+            return;
+        }
+
+        $run = QueueJobRun::firstOrCreate(['project_id' => $project->id, 'job_id' => $jobId], $values);
+
+        if ($run->wasRecentlyCreated) {
+            return;
+        }
+
+        $this->fillJobRunBlanks($run, $values);
+        $run->save();
     }
 
     /**
@@ -289,34 +319,238 @@ class EventStore
     }
 
     /**
+     * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
+     *
+     * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeJobAttempt(Project $project, array $data): void {}
+    private function storeJobAttempt(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+        $jobId = $this->stringOrNull($data['job_id'] ?? null);
+        $startedAt = $this->parseTimestamp($data['started_at'] ?? null, allowNull: true);
+
+        $outcome = [
+            'status' => (string) ($data['status'] ?? 'unknown'),
+            'attempts' => (int) ($data['attempts'] ?? 1),
+            'started_at' => $startedAt,
+            'completed_at' => $this->parseTimestamp($data['completed_at'] ?? null, allowNull: true),
+            'failed_at' => $this->parseTimestamp($data['failed_at'] ?? null, allowNull: true),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'exception' => $data['exception'] ?? null,
+        ];
+
+        $details = [
+            'trace_id' => $trace?->id,
+            'job_class' => (string) ($data['class'] ?? $data['job_class'] ?? 'UnknownJob'),
+            'queue' => $this->stringOrNull($data['queue'] ?? null),
+            'connection' => $this->stringOrNull($data['connection'] ?? null),
+            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+        ];
+
+        $values = ['project_id' => $project->id, 'job_id' => $jobId, 'dispatched_at' => null, ...$details, ...$outcome];
+
+        if ($jobId === null) {
+            QueueJobRun::create($values);
+
+            return;
+        }
+
+        $run = QueueJobRun::firstOrCreate(['project_id' => $project->id, 'job_id' => $jobId], $values);
+
+        if ($run->wasRecentlyCreated) {
+            return;
+        }
+
+        DB::transaction(function () use ($run, $startedAt, $outcome, $details): void {
+            $locked = QueueJobRun::whereKey($run->id)->lockForUpdate()->firstOrFail();
+
+            if ($this->isNewestAttempt($locked, $startedAt, $outcome['attempts'])) {
+                $locked->fill($outcome);
+            }
+
+            $this->fillJobRunBlanks($locked, $details);
+            $locked->save();
+        }, attempts: 3);
+    }
+
+    /**
+     * Whether an attempt is at least as recent as the one the run currently reflects.
+     *
+     * Start times are stored with second precision, so attempts that began within the same second are ordered by
+     * attempt number instead.
+     */
+    private function isNewestAttempt(QueueJobRun $run, ?CarbonImmutable $startedAt, int $attempts): bool
+    {
+        if ($run->started_at === null) {
+            return true;
+        }
+
+        if ($startedAt === null) {
+            return false;
+        }
+
+        if ($startedAt->equalTo($run->started_at)) {
+            return $attempts >= $run->attempts;
+        }
+
+        return $startedAt->greaterThan($run->started_at);
+    }
+
+    /**
+     * Fill the run's empty columns from the candidates, and replace a placeholder job class; filled columns are kept.
+     *
+     * @param  array<string, mixed>  $candidates
+     */
+    private function fillJobRunBlanks(QueueJobRun $run, array $candidates): void
+    {
+        foreach (['dispatched_at', 'trace_id', 'queue', 'connection', 'user_identifier', 'environment'] as $column) {
+            if ($run->{$column} === null && ($candidates[$column] ?? null) !== null) {
+                $run->{$column} = $candidates[$column];
+            }
+        }
+
+        $jobClass = $candidates['job_class'] ?? null;
+
+        if ($run->job_class === 'UnknownJob' && $jobClass !== null && $jobClass !== 'UnknownJob') {
+            $run->job_class = $jobClass;
+        }
+    }
+
+    /**
+     * Persist a command run. Command runs have no trace to link to, so the record is a plain insert.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function storeCommand(Project $project, array $data): void
+    {
+        CommandRun::create([
+            'project_id' => $project->id,
+            'command' => $this->stringOrNull($data['command'] ?? null) ?? 'unknown',
+            'arguments' => is_array($data['arguments'] ?? null) ? $data['arguments'] : null,
+            'options' => is_array($data['options'] ?? null) ? $data['options'] : null,
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'completed',
+            'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'output' => $this->stringOrNull($data['output'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
+
+    /**
+     * Persist a scheduled task run as a plain insert. Runs are grouped by `task_hash`, which falls back to the sha1
+     * of the task name unless the event carries a 40 character hex hash (the only shape the detail route accepts).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function storeScheduledTask(Project $project, array $data): void
+    {
+        $task = $this->stringOrNull($data['task'] ?? null) ?? 'unknown';
+        $suppliedHash = $this->stringOrNull($data['task_hash'] ?? null);
+
+        ScheduledTaskRun::create([
+            'project_id' => $project->id,
+            'task' => $task,
+            'task_hash' => $suppliedHash !== null && preg_match('/^[0-9a-f]{40}$/i', $suppliedHash) ? $suppliedHash : sha1($task),
+            'schedule' => $this->stringOrNull($data['schedule'] ?? null),
+            'schedule_summary' => $this->stringOrNull($data['schedule_summary'] ?? null),
+            'next_run_at' => $this->parseTimestamp($data['next_run_at'] ?? null, allowNull: true),
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'processed',
+            'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'threshold_ms' => $this->intOrNull($data['threshold_ms'] ?? null),
+            'output' => $this->stringOrNull($data['output'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
+
+    /**
+     * Persist a sent mail against its trace, which is created as a stub if the request record has not arrived yet.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function storeMail(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        MailSend::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'mailable_class' => $this->stringOrNull($data['class'] ?? $data['mailable_class'] ?? null) ?? 'UnknownMailable',
+            'mailer' => $this->stringOrNull($data['mailer'] ?? null),
+            'subject' => $this->stringOrNull($data['subject'] ?? null),
+            'recipients_count' => (int) ($data['recipients_count'] ?? 0),
+            'attachments_count' => (int) ($data['attachments_count'] ?? 0),
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'sent',
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private function storeCommand(Project $project, array $data): void {}
+    private function storeNotification(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        NotificationSend::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'notification_class' => $this->stringOrNull($data['class'] ?? $data['notification_class'] ?? null) ?? 'UnknownNotification',
+            'channel' => $this->stringOrNull($data['channel'] ?? null) ?? 'unknown',
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'sent',
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
      * @param  array<string, mixed>  $data
      */
-    private function storeScheduledTask(Project $project, array $data): void {}
+    private function storeOutgoingRequest(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+
+        OutgoingRequest::create([
+            'project_id' => $project->id,
+            'trace_id' => $trace?->id,
+            'method' => strtoupper($this->stringOrNull($data['method'] ?? null) ?? 'GET'),
+            'host' => (string) ($data['host'] ?? ''),
+            'url' => (string) ($data['url'] ?? ''),
+            'status_code' => $this->intOrNull($data['status_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'request_size_bytes' => $this->intOrNull($data['request_size_bytes'] ?? null),
+            'response_size_bytes' => $this->intOrNull($data['response_size_bytes'] ?? null),
+            ...$this->sourceAttributes($data),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
+     * The `source_*` columns shared by mail, notification and outgoing request rows.
+     *
      * @param  array<string, mixed>  $data
+     * @return array{source_type: string|null, source_id: string|null, source_label: string|null}
      */
-    private function storeMail(Project $project, array $data): void {}
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function storeNotification(Project $project, array $data): void {}
-
-    /**
-     * @param  array<string, mixed>  $data
-     */
-    private function storeOutgoingRequest(Project $project, array $data): void {}
+    private function sourceAttributes(array $data): array
+    {
+        return [
+            'source_type' => $this->stringOrNull($data['source_type'] ?? null),
+            'source_id' => $this->stringOrNull($data['source_id'] ?? null),
+            'source_label' => $this->stringOrNull($data['source_label'] ?? null),
+        ];
+    }
 
     /**
      * Persist the name and email of an end user, and hand them to the traces and errors that were stored without.
