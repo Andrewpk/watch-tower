@@ -156,6 +156,10 @@ class EventStore
     }
 
     /**
+     * The trace is marked `has_errors` first, before the occurrence insert: the insert takes a shared foreign key
+     * lock on the trace row, and upgrading that to the exclusive lock of the update afterwards can deadlock with
+     * another job that updates the same trace row.
+     *
      * @param  array<string, mixed>  $data
      */
     private function storeException(Project $project, array $data): void
@@ -177,6 +181,10 @@ class EventStore
         $release = $this->limitedString($data['release'] ?? null, 255);
 
         $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release) {
+            if ($trace && ! $trace->has_errors) {
+                $trace->forceFill(['has_errors' => true])->save();
+            }
+
             $group = ErrorGroup::where('project_id', $project->id)
                 ->where('fingerprint', $fingerprint)
                 ->lockForUpdate()
@@ -231,10 +239,6 @@ class EventStore
                 'context' => $data['context'] ?? null,
                 'occurred_at' => $occurredAt,
             ]);
-
-            if ($trace) {
-                $trace->forceFill(['has_errors' => true])->save();
-            }
 
             return $occurrence;
         });
@@ -695,6 +699,8 @@ class EventStore
      *
      * The group's handled flag and runtime versions follow its newest occurrence ("latest wins"): they are applied
      * only together with `last_occurrence_at`, and a version the occurrence did not report keeps the stored one.
+     * Timestamps are stored at second precision, so of two occurrences in the same second the first one processed
+     * keeps the flag and versions.
      *
      * @param  array{is_handled: bool, language_version: string|null, framework_version: string|null}  $latestDetails
      */

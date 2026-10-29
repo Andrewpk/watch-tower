@@ -83,7 +83,7 @@ class ExceptionStats
         $groups = $query->get();
 
         return $groups
-            ->map(function (ErrorGroup $group) use ($occurrenceCounts) {
+            ->map(function (ErrorGroup $group) use ($occurrenceCounts, $handled) {
                 $stats = $occurrenceCounts->get($group->id);
 
                 return [
@@ -97,7 +97,7 @@ class ExceptionStats
                         : null,
                     'total_count' => (int) ($stats?->total ?? 0),
                     'users_count' => (int) ($stats?->users_count ?? 0),
-                    'is_handled' => (bool) $group->is_handled,
+                    'is_handled' => $handled ?? (bool) $group->is_handled,
                 ];
             })
             ->sortByDesc('last_occurrence_at')
@@ -106,6 +106,9 @@ class ExceptionStats
     }
 
     /**
+     * `first_release` is the release of the oldest retained occurrence that has one; older occurrences may already
+     * have been pruned.
+     *
      * @return array{
      *   last_seen: string|null,
      *   first_seen: string|null,
@@ -165,6 +168,7 @@ class ExceptionStats
         $firstRelease = (clone $base)
             ->whereNotNull('release_version')
             ->orderBy('occurred_at')
+            ->orderBy('id')
             ->value('release_version');
 
         $first = $group->first_occurrence_at?->toIso8601String();

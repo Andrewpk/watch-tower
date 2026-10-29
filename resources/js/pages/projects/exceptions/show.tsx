@@ -213,10 +213,7 @@ function DetailsCard({ exception }: { exception: ExceptionDetail }) {
         {
             label: 'First reported in',
             value: exception.first_release ? (
-                <span
-                    className="font-mono break-all"
-                    title={exception.first_release}
-                >
+                <span className="font-mono break-all">
                     {exception.first_release}
                 </span>
             ) : (
@@ -235,7 +232,7 @@ function DetailsCard({ exception }: { exception: ExceptionDetail }) {
             label: 'Laravel versions',
             value: (
                 <span className="font-mono">
-                    {laravelVersions.length ? laravelVersions.join(' - ') : '—'}
+                    {laravelVersions.length ? laravelVersions.join(', ') : '—'}
                 </span>
             ),
         },
