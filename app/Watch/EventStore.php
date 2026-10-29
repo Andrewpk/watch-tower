@@ -64,8 +64,12 @@ class EventStore
      * The trace is keyed on (project, correlation id), so a request can never touch another project's trace.
      * `has_errors` and `has_slow_queries` are only ever raised: a request record that does not report them must not
      * undo what the child records already flagged. The same goes for `user_name` and `user_email`, which a `user`
-     * record may have filled in already. When the request carries a user but no details were known while storing it,
-     * the end user is read again afterwards, see `completeUserDetails()`.
+     * record may have filled in already. `db_time_ms` is the sum of the stored query durations, kept up to date by
+     * `storeQuery()`, so it is only written when the record carries it (legacy clients): a request record from
+     * Nightwatch has no such field and must not reset what queries that arrived first already added. A legacy client
+     * that sends `db_time_ms` on the request and also sends query records counts that time twice. When the request
+     * carries a user but no details were known while storing it, the end user is read again afterwards, see
+     * `completeUserDetails()`.
      *
      * @param  array<string, mixed>  $data
      */
@@ -88,7 +92,6 @@ class EventStore
             ...$userDetails,
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
             'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
-            'db_time_ms' => (int) ($data['db_time_ms'] ?? 0),
             'memory_used_kb' => $this->intOrNull($data['memory_used_kb'] ?? null),
             'memory_peak_kb' => $this->intOrNull($data['memory_peak_kb'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
@@ -105,6 +108,7 @@ class EventStore
                 'has_errors' => (bool) ($data['has_errors'] ?? false),
                 'has_slow_queries' => (bool) ($data['has_slow_queries'] ?? false),
             ]),
+            ...(array_key_exists('db_time_ms', $data) ? ['db_time_ms' => max(0.0, (float) $data['db_time_ms'])] : []),
         ];
 
         $trace = Trace::firstOrCreate(
@@ -125,7 +129,8 @@ class EventStore
      * Persist a query against its trace, which is created as a stub if the request record has not arrived yet.
      *
      * A query without any correlation id has no trace to belong to (`trace_id` is required), so it is the only case
-     * that is dropped, and it is logged rather than discarded silently.
+     * that is dropped, and it is logged rather than discarded silently. The query's duration is added to the
+     * trace's `db_time_ms` in the same transaction, so the sum always equals the stored query durations.
      *
      * @param  array<string, mixed>  $data
      */
@@ -139,20 +144,31 @@ class EventStore
             return;
         }
 
-        TraceQuery::create([
-            'project_id' => $project->id,
-            'trace_id' => $trace->id,
-            'query_type' => $this->detectQueryType((string) ($data['sql'] ?? '')),
-            'sql' => (string) ($data['sql'] ?? ''),
-            'bindings' => $data['bindings'] ?? null,
-            'connection_name' => $this->stringOrNull($data['connection'] ?? null),
-            'duration_ms' => (float) ($data['duration_ms'] ?? 0),
-            'row_count' => $this->intOrNull($data['row_count'] ?? null),
-            'is_n_plus_one' => (bool) ($data['is_n_plus_one'] ?? false),
-            'n_plus_one_group' => $this->stringOrNull($data['n_plus_one_group'] ?? null),
-            'is_slow' => (bool) ($data['is_slow'] ?? false),
-            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
-        ]);
+        $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
+
+        // The trace row is updated before the query row is inserted: the insert takes a shared lock on the parent
+        // trace row (foreign key), and upgrading it to the exclusive lock of an UPDATE afterwards deadlocks on MySQL
+        // when two queries of one request are stored concurrently.
+        DB::transaction(function () use ($trace, $durationMs, $project, $data): void {
+            if ($durationMs > 0) {
+                Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);
+            }
+
+            TraceQuery::create([
+                'project_id' => $project->id,
+                'trace_id' => $trace->id,
+                'query_type' => $this->detectQueryType((string) ($data['sql'] ?? '')),
+                'sql' => (string) ($data['sql'] ?? ''),
+                'bindings' => $data['bindings'] ?? null,
+                'connection_name' => $this->stringOrNull($data['connection'] ?? null),
+                'duration_ms' => $durationMs,
+                'row_count' => $this->intOrNull($data['row_count'] ?? null),
+                'is_n_plus_one' => (bool) ($data['is_n_plus_one'] ?? false),
+                'n_plus_one_group' => $this->stringOrNull($data['n_plus_one_group'] ?? null),
+                'is_slow' => (bool) ($data['is_slow'] ?? false),
+                'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+            ]);
+        }, attempts: 3);
     }
 
     /**
