@@ -22,6 +22,8 @@ import {
 } from 'recharts';
 
 import { PageHeader } from '@/components/page-header';
+import { StageBar, StageBreakdown } from '@/components/stage-breakdown';
+import type { RequestStages } from '@/components/stage-breakdown';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -73,6 +75,8 @@ type Summary = {
 type RouteRow = {
     method: string;
     uri: string;
+    route_name: string | null;
+    route_action: string | null;
     success: number;
     client_error: number;
     server_error: number;
@@ -84,6 +88,16 @@ type RouteRow = {
 type RouteDetail = {
     method: string;
     uri: string;
+    route: {
+        name: string | null;
+        action: string | null;
+        domain: string | null;
+    };
+    stages: RequestStages;
+    sizes: {
+        avg_request_bytes: number | null;
+        avg_response_bytes: number | null;
+    };
     totals: Summary['totals'];
     duration: { avg_ms: number | null; p95_ms: number | null };
     buckets: Bucket[];
@@ -91,6 +105,7 @@ type RouteDetail = {
         id: string;
         status_code: number | null;
         duration_ms: number | null;
+        stages: RequestStages;
         occurred_at: string | null;
         user_identifier: string | null;
     }>;
@@ -378,6 +393,17 @@ export default function RequestsIndex({
                                                         <span className="truncate">
                                                             {row.uri}
                                                         </span>
+                                                        {row.route_name ? (
+                                                            <span
+                                                                className="truncate text-muted-foreground"
+                                                                title={
+                                                                    row.route_action ??
+                                                                    undefined
+                                                                }
+                                                            >
+                                                                {row.route_name}
+                                                            </span>
+                                                        ) : null}
                                                         {isActive ? (
                                                             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                                                         ) : null}
@@ -656,7 +682,18 @@ function RouteDetailPanel({
                 <div className="flex items-start justify-between border-b border-border px-6 py-4">
                     <div className="flex items-start gap-3">
                         <MethodBadge method={detail.method} />
-                        <div className="font-mono text-sm">{detail.uri}</div>
+                        <div>
+                            <div className="font-mono text-sm">
+                                {detail.uri}
+                            </div>
+                            {detail.route.name || detail.route.action ? (
+                                <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                                    {[detail.route.name, detail.route.action]
+                                        .filter(Boolean)
+                                        .join(' · ')}
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                     <Button variant="ghost" size="icon" onClick={onClose}>
                         <X className="h-4 w-4" />
@@ -824,6 +861,30 @@ function RouteDetailPanel({
                         </CardContent>
                     </Card>
 
+                    {hasStageData(detail) ? (
+                        <Card>
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                                    Stages
+                                </CardTitle>
+                            </CardHeader>
+                            <Separator />
+                            <CardContent className="p-4">
+                                <StageBreakdown stages={detail.stages} />
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                    Avg request{' '}
+                                    {formatBytes(
+                                        detail.sizes.avg_request_bytes,
+                                    )}
+                                    {' · '}Avg response{' '}
+                                    {formatBytes(
+                                        detail.sizes.avg_response_bytes,
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ) : null}
+
                     <Card>
                         <CardHeader className="pb-3">
                             <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
@@ -869,6 +930,10 @@ function RouteDetailPanel({
                                                     {formatMs(
                                                         trace.duration_ms,
                                                     )}
+                                                    <StageBar
+                                                        stages={trace.stages}
+                                                        className="mt-1"
+                                                    />
                                                 </TableCell>
                                                 <TableCell className="py-2 font-mono text-xs text-muted-foreground">
                                                     {trace.user_identifier ??
@@ -1013,6 +1078,30 @@ function formatMs(value: number | null): string {
     }
 
     return `${Math.round(value)} ms`;
+}
+
+function hasStageData(detail: RouteDetail): boolean {
+    return (
+        Object.values(detail.stages).some((value) => value !== null) ||
+        detail.sizes.avg_request_bytes !== null ||
+        detail.sizes.avg_response_bytes !== null
+    );
+}
+
+function formatBytes(value: number | null): string {
+    if (value === null || Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value >= 1024 * 1024) {
+        return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    }
+
+    if (value >= 1024) {
+        return `${(value / 1024).toFixed(1)} KB`;
+    }
+
+    return `${Math.round(value)} B`;
 }
 
 function formatTime(iso: string): string {
