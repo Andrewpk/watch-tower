@@ -50,7 +50,7 @@ class Trace extends Model
             'status_code' => 'integer',
             'duration_ms' => 'integer',
             'db_queries_count' => 'integer',
-            'db_time_ms' => 'integer',
+            'db_time_ms' => 'float',
             'memory_used_kb' => 'integer',
             'memory_peak_kb' => 'integer',
             'headers' => 'array',

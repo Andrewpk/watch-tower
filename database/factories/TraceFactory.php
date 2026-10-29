@@ -22,7 +22,7 @@ class TraceFactory extends Factory
             'status_code' => 200,
             'duration_ms' => fake()->numberBetween(10, 500),
             'db_queries_count' => fake()->numberBetween(0, 20),
-            'db_time_ms' => fake()->numberBetween(0, 200),
+            'db_time_ms' => fake()->randomFloat(3, 0, 200),
             'memory_used_kb' => fake()->numberBetween(1024, 32768),
             'memory_peak_kb' => fake()->numberBetween(2048, 65536),
             'environment' => 'production',

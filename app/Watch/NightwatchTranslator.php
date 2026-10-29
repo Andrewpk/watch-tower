@@ -73,6 +73,11 @@ class NightwatchTranslator
     }
 
     /**
+     * The wire `duration` is in microseconds and is kept as fractional milliseconds: most queries finish in well
+     * under a millisecond, and whole-millisecond rounding would store them as 0 (and sum to nothing). `sql` is cut
+     * on a character boundary to the 65,535 bytes of our `trace_queries.sql` TEXT column (the sensor itself sends up
+     * to 16 MB), so statements sharing their first 64 KB are grouped together.
+     *
      * @param  array<string, mixed>  $r
      * @return array{type: string, id: string, data: array<string, mixed>}
      */
@@ -80,15 +85,29 @@ class NightwatchTranslator
     {
         return [
             'type' => 'query',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'sql' => (string) ($r['sql'] ?? ''),
-                'connection' => $this->stringOrNull($r['connection'] ?? null),
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'sql' => mb_strcut($this->scalarString($r['sql'] ?? null), 0, 65_535, 'UTF-8'),
+                'connection' => $this->limit($r['connection'] ?? null, 100),
+                'duration_ms' => $this->microsToFractionalMillis($r['duration'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
+    }
+
+    /**
+     * Microseconds to milliseconds with three decimals, matching the `decimal(12,3)` of `trace_queries.duration_ms`.
+     * Negative values are clamped to zero and huge ones to the column maximum; non-numeric and non-finite input
+     * (such as `1e400`, which casts to INF) is null.
+     */
+    private function microsToFractionalMillis(mixed $value): ?float
+    {
+        if (! is_numeric($value) || ! is_finite((float) $value)) {
+            return null;
+        }
+
+        return min(round(max(0, (float) $value) / 1000, 3), 999_999_999.999);
     }
 
     /**
