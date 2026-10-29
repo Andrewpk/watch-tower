@@ -33,7 +33,7 @@ it('deletes rows older than the retention window from every telemetry table and 
     $this->artisan('watch:prune')->assertSuccessful();
 
     expect(pruneTelemetryCounts($project))->each->toBe(1)
-        ->and(pruneTelemetryCounts($project))->toHaveCount(13);
+        ->and(pruneTelemetryCounts($project))->toHaveCount(14);
 
     expect(DB::table('trace_queries')->where('project_id', $project->id)->value('occurred_at'))
         ->toStartWith('2026-05-17');
@@ -82,7 +82,7 @@ it('deletes nothing and reports counts per table with --dry-run', function () {
             ['Table', 'Rows to delete'],
             collect(array_keys(TelemetryPruner::TIME_COLUMNS))->map(fn (string $table) => [$table, 1])->all(),
         )
-        ->expectsOutputToContain('Dry run: 13 rows would be deleted.')
+        ->expectsOutputToContain('Dry run: 14 rows would be deleted.')
         ->assertSuccessful();
 
     expect(pruneTelemetryCounts($project))->each->toBe(2);
@@ -98,7 +98,7 @@ it('reports rows deleted per table', function () {
             ['Table', 'Rows deleted'],
             collect(array_keys(TelemetryPruner::TIME_COLUMNS))->map(fn (string $table) => [$table, 1])->all(),
         )
-        ->expectsOutputToContain('Deleted 13 rows.')
+        ->expectsOutputToContain('Deleted 14 rows.')
         ->assertSuccessful();
 });
 

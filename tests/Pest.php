@@ -103,7 +103,7 @@ function postNightwatchBody(string $body, string $token, bool $gzip = true): Tes
 
 /**
  * Insert one telemetry row stamped at `$at` into every per-project telemetry table
- * (13 rows), with the query and event rows attached to the trace.
+ * (14 rows), with the query and event rows attached to the trace.
  */
 function seedTelemetry(Project $project, CarbonInterface $at): void
 {
@@ -128,6 +128,7 @@ function seedTelemetry(Project $project, CarbonInterface $at): void
         'cache_events' => ['key' => 'k', 'operation' => 'hit', 'occurred_at' => $at],
         'outgoing_requests' => ['method' => 'GET', 'host' => 'example.test', 'url' => 'https://example.test', 'occurred_at' => $at],
         'log_entries' => ['level' => 'info', 'message' => 'hello', 'occurred_at' => $at],
+        'end_users' => ['identifier' => (string) Str::uuid(), 'name' => 'Jane Example', 'email' => 'jane@example.com', 'last_seen_at' => $at],
     ];
 
     foreach ($rows as $table => $row) {

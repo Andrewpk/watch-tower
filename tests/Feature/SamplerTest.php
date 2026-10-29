@@ -68,6 +68,20 @@ it('never samples out exceptions', function () {
     }
 });
 
+it('never samples out user records', function () {
+    $sampler = new Sampler;
+
+    foreach ([0.0, 0.0001, 0.5] as $rate) {
+        $project = Project::factory()->make(['sampling_rate' => $rate]);
+
+        foreach (range(1, 200) as $i) {
+            $event = ['type' => 'user', 'id' => "user-{$i}", 'data' => ['user_id' => "user-{$i}", 'name' => 'Jane Example']];
+
+            expect($sampler->shouldKeep($project, $event))->toBeTrue();
+        }
+    }
+});
+
 it('keeps a request and all of its children together', function () {
     $project = Project::factory()->make(['sampling_rate' => 0.5]);
     $sampler = new Sampler;

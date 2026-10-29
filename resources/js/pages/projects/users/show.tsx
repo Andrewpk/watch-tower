@@ -114,7 +114,7 @@ function InfoCard({
     range: string;
 }) {
     const filterByUser = { query: { user_id: user.id, range } };
-    const filterByName = { query: { user: user.name ?? '', range } };
+    const filterByLogUser = { query: { user: user.id, range } };
 
     return (
         <Card>
@@ -172,7 +172,7 @@ function InfoCard({
                     <FilterChip
                         icon={FileText}
                         label="Logs"
-                        href={logsRoutes.index(slug, filterByName).url}
+                        href={logsRoutes.index(slug, filterByLogUser).url}
                     />
                 </div>
             </CardContent>

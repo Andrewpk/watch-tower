@@ -532,12 +532,32 @@ class NightwatchTranslator
     }
 
     /**
+     * Translate a `user` record into the details of an end user.
+     *
+     * `id` is the same value the other records carry in their `user` field, `name` and `username` are the display
+     * name and (by default) the email address. Returns null when the record has no id to attach the details to.
+     *
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array{user_id: string, name: string|null, email: string|null, occurred_at: string|null}}|null
      */
     private function translateUser(array $r): ?array
     {
-        return null;
+        $userId = $this->limit($r['id'] ?? null, 255);
+
+        if ($userId === null) {
+            return null;
+        }
+
+        return [
+            'type' => 'user',
+            'id' => $userId,
+            'data' => [
+                'user_id' => $userId,
+                'name' => $this->limit($r['name'] ?? null, 255),
+                'email' => $this->limit($r['username'] ?? null, 255),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
     }
 
     private function normalizeCacheOperation(mixed $value): string

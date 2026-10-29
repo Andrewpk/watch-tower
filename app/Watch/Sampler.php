@@ -15,6 +15,8 @@ use App\Models\Project;
  *
  * Rules, in order:
  *  - exceptions are never sampled out, whatever the rate;
+ *  - neither are `user` records: they are keyed on the user id rather than a trace id, so hashing them would drop
+ *    the details of some users for good while their requests are kept;
  *  - rate >= 1 keeps everything and rate <= 0 keeps nothing else;
  *  - an event with no usable id is kept. Without an id there is nothing stable
  *    to hash, and a random draw would break the request/children grouping and
@@ -27,7 +29,7 @@ class Sampler
      */
     public function shouldKeep(Project $project, array $event): bool
     {
-        if (($event['type'] ?? null) === 'exception') {
+        if (in_array($event['type'] ?? null, ['exception', 'user'], true)) {
             return true;
         }
 

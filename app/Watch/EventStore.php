@@ -4,6 +4,7 @@ namespace App\Watch;
 
 use App\Models\CacheEvent;
 use App\Models\CommandRun;
+use App\Models\EndUser;
 use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\EventOccurrence;
@@ -62,7 +63,9 @@ class EventStore
      *
      * The trace is keyed on (project, correlation id), so a request can never touch another project's trace.
      * `has_errors` and `has_slow_queries` are only ever raised: a request record that does not report them must not
-     * undo what the child records already flagged.
+     * undo what the child records already flagged. The same goes for `user_name` and `user_email`, which a `user`
+     * record may have filled in already. When the request carries a user but no details were known while storing it,
+     * the end user is read again afterwards, see `completeUserDetails()`.
      *
      * @param  array<string, mixed>  $data
      */
@@ -74,12 +77,15 @@ class EventStore
             return;
         }
 
+        $userIdentifier = $this->stringOrNull($data['user_id'] ?? null);
+        $userDetails = $this->userDetails($project, $userIdentifier, $data);
+
         $values = [
             'method' => (string) ($data['method'] ?? 'GET'),
             'uri' => (string) ($data['uri'] ?? '/'),
             'status_code' => $this->intOrNull($data['status_code'] ?? null),
-            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
-            'user_email' => $this->stringOrNull($data['user_email'] ?? null),
+            'user_identifier' => $userIdentifier,
+            ...$userDetails,
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
             'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
             'db_time_ms' => (int) ($data['db_time_ms'] ?? 0),
@@ -108,6 +114,10 @@ class EventStore
 
         if (! $trace->wasRecentlyCreated) {
             $trace->fill($values)->save();
+        }
+
+        if ($userIdentifier !== null && $userDetails === []) {
+            $this->completeUserDetails(Trace::class, $project, $trace->id, $userIdentifier);
         }
     }
 
@@ -158,8 +168,10 @@ class EventStore
         $file = $this->stringOrNull($data['file'] ?? null);
         $line = $this->intOrNull($data['line'] ?? null);
         $occurredAt = $this->parseTimestamp($data['occurred_at'] ?? null);
+        $userIdentifier = $this->stringOrNull($data['user_id'] ?? null);
+        $userDetails = $this->userDetails($project, $userIdentifier, $data);
 
-        DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data) {
+        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails) {
             $group = ErrorGroup::where('project_id', $project->id)
                 ->where('fingerprint', $fingerprint)
                 ->lockForUpdate()
@@ -185,7 +197,7 @@ class EventStore
                 ]);
             }
 
-            ErrorOccurrence::create([
+            $occurrence = ErrorOccurrence::create([
                 'project_id' => $project->id,
                 'trace_id' => $trace?->id,
                 'error_group_id' => $group->id,
@@ -193,8 +205,9 @@ class EventStore
                 'message' => $message,
                 'stacktrace' => $data['trace'] ?? $data['stacktrace'] ?? [],
                 'fingerprint' => $fingerprint,
-                'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
-                'user_email' => $this->stringOrNull($data['user_email'] ?? null),
+                'user_identifier' => $userIdentifier,
+                'user_name' => $userDetails['user_name'] ?? null,
+                'user_email' => $userDetails['user_email'] ?? null,
                 'file' => $file,
                 'line' => $line,
                 'environment' => $this->stringOrNull($data['environment'] ?? null),
@@ -206,7 +219,13 @@ class EventStore
             if ($trace) {
                 $trace->forceFill(['has_errors' => true])->save();
             }
+
+            return $occurrence;
         });
+
+        if ($userIdentifier !== null && $userDetails === []) {
+            $this->completeUserDetails(ErrorOccurrence::class, $project, $occurrence->id, $userIdentifier);
+        }
     }
 
     /**
@@ -534,9 +553,119 @@ class EventStore
     }
 
     /**
+     * Persist the name and email of an end user, and hand them to the traces and errors that were stored without.
+     *
+     * A `user` record is sent just before the `request` record it belongs to, but the two are processed by
+     * independent queue jobs, so either can win. The two jobs cover each other: whichever comes second fills the
+     * row. A request or exception stored first is filled here, and only when the end user is created, because
+     * upstream sends a `user` record for every authenticated request and the backfill scans every retained row of
+     * the user. One stored after the end user existed gets its details from `userDetails()`, or from
+     * `completeUserDetails()` if the end user appeared in between.
+     *
+     * An existing end user is only updated by a record that is not older than the stored one, in a single
+     * conditional UPDATE so that concurrent workers cannot move it backwards, and a missing value never erases a
+     * stored one.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeUser(Project $project, array $data): void {}
+    private function storeUser(Project $project, array $data): void
+    {
+        $identifier = $this->stringOrNull($data['user_id'] ?? null);
+        $name = $this->stringOrNull($data['name'] ?? null);
+        $email = $this->stringOrNull($data['email'] ?? null);
+
+        if ($identifier === null || ($name === null && $email === null)) {
+            return;
+        }
+
+        $seenAt = $this->parseTimestamp($data['occurred_at'] ?? null);
+
+        $user = EndUser::firstOrCreate(
+            ['project_id' => $project->id, 'identifier' => $identifier],
+            ['name' => $name, 'email' => $email, 'last_seen_at' => $seenAt],
+        );
+
+        if (! $user->wasRecentlyCreated) {
+            EndUser::whereKey($user->id)
+                ->where('last_seen_at', '<=', $seenAt)
+                ->update([
+                    ...array_filter(['name' => $name, 'email' => $email], fn (?string $value): bool => $value !== null),
+                    'last_seen_at' => $seenAt,
+                ]);
+
+            return;
+        }
+
+        $details = array_filter(
+            ['user_name' => $name, 'user_email' => $email],
+            fn (?string $value): bool => $value !== null,
+        );
+
+        foreach ([Trace::class, ErrorOccurrence::class] as $model) {
+            $model::where('project_id', $project->id)
+                ->where('user_identifier', $identifier)
+                ->whereNull('user_name')
+                ->whereNull('user_email')
+                ->update($details);
+        }
+    }
+
+    /**
+     * The `user_name` and `user_email` to store with a record, leaving out whichever is unknown.
+     *
+     * Details sent with the record win; otherwise the ones a `user` record stored for the user are used. Unknown
+     * values are left out rather than set to null so that spreading the result into an update never erases details
+     * a `user` record backfilled.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{user_name?: string, user_email?: string}
+     */
+    private function userDetails(Project $project, ?string $userIdentifier, array $data): array
+    {
+        $name = $this->stringOrNull($data['user_name'] ?? null);
+        $email = $this->stringOrNull($data['user_email'] ?? null);
+
+        if ($userIdentifier !== null && $name === null && $email === null) {
+            $user = EndUser::where('project_id', $project->id)->where('identifier', $userIdentifier)->first();
+
+            $name = $user?->name;
+            $email = $user?->email;
+        }
+
+        return array_filter(
+            ['user_name' => $name, 'user_email' => $email],
+            fn (?string $value): bool => $value !== null,
+        );
+    }
+
+    /**
+     * Fill the user details of one freshly stored trace or error occurrence if its end user turned up meanwhile.
+     *
+     * The record was stored without details because no end user existed when `userDetails()` looked. A `user`
+     * record processed in the meantime may have missed the row when it backfilled, so look again now that the row
+     * is stored. Only this row is touched, by primary key, and only if it still has no details.
+     *
+     * @param  class-string<Trace|ErrorOccurrence>  $model
+     */
+    private function completeUserDetails(string $model, Project $project, string $rowId, string $userIdentifier): void
+    {
+        $user = EndUser::where('project_id', $project->id)->where('identifier', $userIdentifier)->first();
+
+        if ($user === null) {
+            return;
+        }
+
+        $details = array_filter(
+            ['user_name' => $user->name, 'user_email' => $user->email],
+            fn (?string $value): bool => $value !== null,
+        );
+
+        if ($details === []) {
+            return;
+        }
+
+        $model::whereKey($rowId)->whereNull('user_name')->whereNull('user_email')->update($details);
+    }
 
     /**
      * Count another occurrence against an existing error group.

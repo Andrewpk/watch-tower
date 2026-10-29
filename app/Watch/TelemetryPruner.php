@@ -25,7 +25,9 @@ class TelemetryPruner
      * `outgoing_requests` and `log_entries` store `trace_id` as a plain string
      * without a foreign key. `queue_job_runs` has no event-time column of its
      * own (only nullable lifecycle timestamps), so its ingest time
-     * `created_at` is used. `metrics` rows are aged by `period_start`.
+     * `created_at` is used. `end_users` are aged by `last_seen_at`, the last
+     * time a `user` record arrived for them. `metrics` rows are aged by
+     * `period_start`.
      *
      * @var array<string, string>
      */
@@ -41,6 +43,7 @@ class TelemetryPruner
         'cache_events' => 'occurred_at',
         'outgoing_requests' => 'occurred_at',
         'log_entries' => 'occurred_at',
+        'end_users' => 'last_seen_at',
         'metrics' => 'period_start',
         'traces' => 'occurred_at',
     ];
