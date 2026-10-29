@@ -103,7 +103,7 @@ class EventStore
             'ip_address' => $this->stringOrNull($data['ip_address'] ?? null),
             ...array_filter([
                 'route_name' => $this->limitedString($data['route_name'] ?? null, 255),
-                'route_methods' => $this->limitedString($data['route_methods'] ?? null, 100),
+                'route_methods' => $this->routeMethodsOrNull($data['route_methods'] ?? null),
                 'route_domain' => $this->limitedString($data['route_domain'] ?? null, 255),
                 'route_action' => $this->limitedString($data['route_action'] ?? null, 255),
                 'request_size_bytes' => $this->unsignedIntOrNull($data['request_size_bytes'] ?? null),
@@ -798,6 +798,21 @@ class EventStore
         }
 
         return mb_substr((string) $value, 0, $length);
+    }
+
+    /**
+     * The route methods as one upper-case string such as `GET|HEAD`: a list is joined with a pipe, dropping entries
+     * that are not non-empty strings. Null when nothing is left.
+     */
+    private function routeMethodsOrNull(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            $value = implode('|', array_filter($value, fn (mixed $method): bool => is_string($method) && $method !== ''));
+        }
+
+        $methods = $this->limitedString($value, 100);
+
+        return $methods === null ? null : strtoupper($methods);
     }
 
     /**

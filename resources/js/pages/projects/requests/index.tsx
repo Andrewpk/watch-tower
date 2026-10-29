@@ -861,23 +861,29 @@ function RouteDetailPanel({
                         </CardContent>
                     </Card>
 
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
-                                Stages
-                            </CardTitle>
-                        </CardHeader>
-                        <Separator />
-                        <CardContent className="p-4">
-                            <StageBreakdown stages={detail.stages} />
-                            <div className="mt-3 text-xs text-muted-foreground">
-                                Avg request{' '}
-                                {formatBytes(detail.sizes.avg_request_bytes)}
-                                {' · '}Avg response{' '}
-                                {formatBytes(detail.sizes.avg_response_bytes)}
-                            </div>
-                        </CardContent>
-                    </Card>
+                    {hasStageData(detail) ? (
+                        <Card>
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-xs tracking-wider text-muted-foreground uppercase">
+                                    Stages
+                                </CardTitle>
+                            </CardHeader>
+                            <Separator />
+                            <CardContent className="p-4">
+                                <StageBreakdown stages={detail.stages} />
+                                <div className="mt-3 text-xs text-muted-foreground">
+                                    Avg request{' '}
+                                    {formatBytes(
+                                        detail.sizes.avg_request_bytes,
+                                    )}
+                                    {' · '}Avg response{' '}
+                                    {formatBytes(
+                                        detail.sizes.avg_response_bytes,
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ) : null}
 
                     <Card>
                         <CardHeader className="pb-3">
@@ -1072,6 +1078,14 @@ function formatMs(value: number | null): string {
     }
 
     return `${Math.round(value)} ms`;
+}
+
+function hasStageData(detail: RouteDetail): boolean {
+    return (
+        Object.values(detail.stages).some((value) => value !== null) ||
+        detail.sizes.avg_request_bytes !== null ||
+        detail.sizes.avg_response_bytes !== null
+    );
 }
 
 function formatBytes(value: number | null): string {

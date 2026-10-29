@@ -136,7 +136,9 @@ class NightwatchTranslator
     private function routeMethods(mixed $value): ?string
     {
         if (! is_array($value)) {
-            return $this->limit($value, 100);
+            $string = $this->limit($value, 100);
+
+            return $string === null ? null : strtoupper($string);
         }
 
         $methods = array_filter($value, fn (mixed $method): bool => is_string($method) && $method !== '');
@@ -598,9 +600,9 @@ class NightwatchTranslator
             return null;
         }
 
-        $int = (int) $value;
+        $number = (float) $value;
 
-        return $int >= 0 && $int <= $max ? $int : null;
+        return is_finite($number) && $number >= 0 && $number <= $max ? (int) $number : null;
     }
 
     /**

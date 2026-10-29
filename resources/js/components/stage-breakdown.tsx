@@ -57,15 +57,20 @@ export const REQUEST_STAGES: Array<{
  * Stage durations are fractional milliseconds: most stages of a fast request take well under one.
  */
 export function formatStageMs(value: number): string {
-    if (value >= 1000) {
+    // Round first, so 999.6 reads "1.00 s" and 99.96 reads "100 ms".
+    if (Math.round(value) >= 1000) {
         return `${(value / 1000).toFixed(2)} s`;
     }
 
-    if (value >= 100) {
+    if (Number(value.toFixed(1)) >= 100) {
         return `${Math.round(value)} ms`;
     }
 
-    return `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
+    if (Number(value.toFixed(2)) >= 10) {
+        return `${value.toFixed(1)} ms`;
+    }
+
+    return `${value.toFixed(2)} ms`;
 }
 
 function visibleStages(stages: RequestStages) {
@@ -76,10 +81,6 @@ function visibleStages(stages: RequestStages) {
         (stage): stage is typeof stage & { value: number } =>
             stage.value !== null && stage.value > 0,
     );
-}
-
-function hasStages(stages: RequestStages): boolean {
-    return REQUEST_STAGES.some((stage) => stages[stage.key] !== null);
 }
 
 /**
@@ -93,16 +94,20 @@ export function StageBreakdown({
     stages: RequestStages;
     className?: string;
 }) {
-    if (!hasStages(stages)) {
+    const visible = visibleStages(stages);
+
+    if (visible.length === 0) {
         return null;
     }
 
-    const visible = visibleStages(stages);
     const total = visible.reduce((sum, stage) => sum + stage.value, 0);
 
     return (
         <div className={cn('space-y-3', className)}>
-            <div className="flex h-3 w-full overflow-hidden rounded-full bg-muted">
+            <div
+                aria-hidden="true"
+                className="flex h-3 w-full overflow-hidden rounded-full bg-muted"
+            >
                 {visible.map((stage) => (
                     <div
                         key={stage.key}
@@ -123,6 +128,7 @@ export function StageBreakdown({
                         >
                             <dt className="flex items-center gap-2 text-muted-foreground">
                                 <span
+                                    aria-hidden="true"
                                     className={cn(
                                         'h-2 w-2 rounded-full',
                                         stage.className,
@@ -161,6 +167,10 @@ export function StageBar({
 
     return (
         <div
+            role="img"
+            aria-label={visible
+                .map((stage) => `${stage.label} ${formatStageMs(stage.value)}`)
+                .join(', ')}
             className={cn(
                 'flex h-1.5 w-full overflow-hidden rounded-full bg-muted',
                 className,

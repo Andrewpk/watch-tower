@@ -111,7 +111,7 @@ it('keeps the stored details when a legacy request record for the trace carries 
 it('stores null for array, negative or huge values on the legacy endpoint', function () {
     stageSyncRequest($this->project, $this->traceId, [
         'route_name' => ['x'],
-        'route_methods' => ['GET'],
+        'route_methods' => [5, ['x']],
         'route_domain' => ['x'],
         'route_action' => ['x'],
         'request_size_bytes' => -1,
@@ -175,7 +175,10 @@ it('finds a route by its name', function () {
 
     $stats = new RequestStats;
 
-    expect($stats->routes($this->project, $this->range, null, 'orders.show'))->toHaveCount(1)
+    $matched = $stats->routes($this->project, $this->range, null, 'orders.show');
+
+    expect($matched)->toHaveCount(1)
+        ->and($matched[0]['p95_ms'])->not->toBeNull()
         ->and($stats->routes($this->project, $this->range, null, 'invoices.show'))->toBeEmpty();
 });
 
@@ -193,12 +196,31 @@ it('averages the stages and sizes in the route detail', function () {
         'action' => 'App\\Http\\Controllers\\OrderController@show',
         'domain' => null,
     ])
-        ->and($detail['stages']['action'])->toBe((5.0 + 3.0 + 5.0) / 3)
-        ->and($detail['stages']['bootstrap'])->toBe(1.234)
+        ->and($detail['stages']['action'])->toEqualWithDelta((5.0 + 3.0) / 2, 0.0001)
+        ->and($detail['stages']['bootstrap'])->toEqualWithDelta(1.234, 0.0001)
         ->and($detail['stages']['sending'])->toBe(0.016)
-        ->and($detail['sizes'])->toBe(['avg_request_bytes' => 768.0, 'avg_response_bytes' => (2048 + 4096 + 2048) / 3])
+        ->and($detail['sizes']['avg_request_bytes'])->toEqualWithDelta(768.0, 0.0001)
+        ->and($detail['sizes']['avg_response_bytes'])->toEqualWithDelta((2048 + 4096 + 2048) / 3, 0.0001)
         ->and($detail['recent'])->toHaveCount(3)
         ->and(collect($detail['recent'])->pluck('stages.terminating')->all())->toBe([1.0, 1.0, 1.0]);
+});
+
+it('averages the stages only over requests that carry stage data', function () {
+    postNightwatchRecords([stageIngestRequest($this->traceId, $this->now)], ingestToken($this->project->id))->assertOk();
+    stageSyncRequest($this->project, (string) Str::uuid(), ['occurred_at' => $this->now->toIso8601String()]);
+
+    $detail = (new RequestStats)->routeDetail($this->project, $this->range, 'GET', '/orders/{order}');
+
+    expect($detail['recent'])->toHaveCount(2)
+        ->and($detail['stages']['bootstrap'])->toEqualWithDelta(1.234, 0.0001)
+        ->and($detail['stages']['action'])->toEqualWithDelta(5.0, 0.0001)
+        ->and($detail['stages']['terminating'])->toEqualWithDelta(1.0, 0.0001);
+});
+
+it('stores the route methods of a legacy request as an upper-case joined string', function () {
+    stageSyncRequest($this->project, $this->traceId, ['route_methods' => ['get', 'head', '', 5, ['x']]]);
+
+    expect(Trace::sole()->route_methods)->toBe('GET|HEAD');
 });
 
 it('returns null stages for a route without stage data', function () {

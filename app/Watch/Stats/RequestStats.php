@@ -155,16 +155,16 @@ class RequestStats
             ->selectRaw('MAX(route_name) AS route_name')
             ->selectRaw('MAX(route_action) AS route_action')
             ->selectRaw('MAX(route_domain) AS route_domain')
-            ->selectRaw('AVG(bootstrap_ms) AS bootstrap_ms')
-            ->selectRaw('AVG(before_middleware_ms) AS before_middleware_ms')
-            ->selectRaw('AVG(action_ms) AS action_ms')
-            ->selectRaw('AVG(render_ms) AS render_ms')
-            ->selectRaw('AVG(after_middleware_ms) AS after_middleware_ms')
-            ->selectRaw('AVG(sending_ms) AS sending_ms')
-            ->selectRaw('AVG(terminating_ms) AS terminating_ms')
             ->selectRaw('AVG(request_size_bytes) AS avg_request_bytes')
             ->selectRaw('AVG(response_size_bytes) AS avg_response_bytes')
             ->first();
+
+        // Averaged only over requests that carry stage data, so the proportions come from one consistent set.
+        $stageQuery = clone $base;
+        foreach (self::STAGE_COLUMNS as $column) {
+            $stageQuery->whereNotNull($column)->selectRaw("AVG({$column}) AS {$column}");
+        }
+        $stageAverages = $stageQuery->first();
 
         $recent = (clone $base)
             ->orderByDesc('occurred_at')
@@ -190,7 +190,7 @@ class RequestStats
                 'action' => $details?->route_action !== null ? (string) $details->route_action : null,
                 'domain' => $details?->route_domain !== null ? (string) $details->route_domain : null,
             ],
-            'stages' => $this->stages($details),
+            'stages' => $this->stages($stageAverages),
             'sizes' => [
                 'avg_request_bytes' => $details?->avg_request_bytes !== null ? (float) $details->avg_request_bytes : null,
                 'avg_response_bytes' => $details?->avg_response_bytes !== null ? (float) $details->avg_response_bytes : null,

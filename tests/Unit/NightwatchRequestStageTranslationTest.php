@@ -84,7 +84,17 @@ it('stores a size outside the unsigned integer range or not numeric as null', fu
     'above the column maximum' => 4_294_967_296,
     'text' => 'abc',
     'array' => [['x']],
+    'huge float' => 1e30,
+    'huge negative float' => -1e30,
+    'infinity' => INF,
+    'not a number' => NAN,
 ]);
+
+it('translates a request with a float status code beyond the integer range without throwing', function () {
+    $data = stageRequestData(['status_code' => 1e30]);
+
+    expect($data['status_code'])->toBeNull();
+});
 
 it('keeps a size of zero and the column maximum', function () {
     $data = stageRequestData(['request_size' => 0, 'response_size' => 4_294_967_295]);
@@ -123,7 +133,7 @@ it('joins the route methods with a pipe', function () {
         ->and(stageRequestData(['route_methods' => []])['route_methods'])->toBeNull()
         ->and(stageRequestData(['route_methods' => null])['route_methods'])->toBeNull()
         ->and(stageRequestData(['route_methods' => [1, ['x'], 'POST']])['route_methods'])->toBe('POST')
-        ->and(stageRequestData(['route_methods' => 'GET'])['route_methods'])->toBe('GET');
+        ->and(stageRequestData(['route_methods' => 'get'])['route_methods'])->toBe('GET');
 });
 
 it('cuts the route methods to 100 characters', function () {
