@@ -4,9 +4,13 @@ use App\Models\EndUser;
 use App\Models\ErrorOccurrence;
 use App\Models\Project;
 use App\Models\Trace;
+use App\Watch\Stats\ExceptionStats;
+use App\Watch\Stats\RequestStats;
 use App\Watch\Stats\TimeRange;
 use App\Watch\Stats\UserStats;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function () {
     $this->project = Project::factory()->create();
@@ -152,7 +156,7 @@ it('keeps a stored email when a newer user record only brings a name', function 
         ->email->toBe('jane@example.com');
 });
 
-it('does not erase backfilled details when the request is processed afterwards', function () {
+it('does not erase backfilled details when the same request is processed again', function () {
     postNightwatchRecords([
         nightwatchRequest($this->base, 'trace-1'),
         nightwatchUser($this->base + 0.5),
@@ -160,7 +164,6 @@ it('does not erase backfilled details when the request is processed afterwards',
 
     expect(Trace::where('correlation_id', 'trace-1')->sole()->user_name)->toBe('Jane Example');
 
-    // The same request record processed again (a queue retry) must not null out what the user record backfilled.
     postNightwatchRecords([nightwatchRequest($this->base, 'trace-1')], $this->token)->assertOk();
 
     expect(Trace::where('correlation_id', 'trace-1')->sole())
@@ -249,4 +252,124 @@ it('is cleaned up with the project', function () {
     $this->project->delete();
 
     expect(EndUser::count())->toBe(0);
+});
+
+it('does not backfill again when a user record arrives for an existing end user', function () {
+    postNightwatchRecords([nightwatchUser($this->base)], $this->token)->assertOk();
+
+    $trace = Trace::factory()->create([
+        'project_id' => $this->project->id,
+        'correlation_id' => 'trace-1',
+        'user_identifier' => 'user-1',
+    ]);
+
+    postNightwatchRecords([nightwatchUser($this->base + 60)], $this->token)->assertOk();
+
+    expect($trace->refresh())
+        ->user_name->toBeNull()
+        ->user_email->toBeNull();
+
+    postNightwatchRecords([nightwatchRequest($this->base + 61, 'trace-1')], $this->token)->assertOk();
+
+    expect($trace->refresh())
+        ->user_name->toBe('Jane Example')
+        ->user_email->toBe('jane@example.com');
+});
+
+it('does not run the backfill queries for a user record of an existing end user', function () {
+    postNightwatchRecords([nightwatchUser($this->base)], $this->token)->assertOk();
+
+    $updates = [];
+    DB::listen(function (QueryExecuted $query) use (&$updates) {
+        if (str_starts_with($query->sql, 'update') && (str_contains($query->sql, '"traces"') || str_contains($query->sql, '"error_occurrences"'))) {
+            $updates[] = $query->sql;
+        }
+    });
+
+    postNightwatchRecords([nightwatchUser($this->base + 60)], $this->token)->assertOk();
+
+    expect($updates)->toBe([]);
+});
+
+it('fills a trace stored while the end user appeared right after the lookup', function () {
+    $created = false;
+    DB::listen(function (QueryExecuted $query) use (&$created) {
+        if (! $created && str_starts_with($query->sql, 'select') && str_contains($query->sql, '"end_users"')) {
+            $created = true;
+            EndUser::factory()->create([
+                'project_id' => $this->project->id,
+                'identifier' => 'user-1',
+                'name' => 'Jane Example',
+                'email' => 'jane@example.com',
+            ]);
+        }
+    });
+
+    postNightwatchRecords([nightwatchRequest($this->base, 'trace-1')], $this->token)->assertOk();
+
+    expect($created)->toBeTrue()
+        ->and(Trace::where('correlation_id', 'trace-1')->sole())
+        ->user_name->toBe('Jane Example')
+        ->user_email->toBe('jane@example.com');
+});
+
+it('fills an error occurrence stored while the end user appeared right after the lookup', function () {
+    $created = false;
+    DB::listen(function (QueryExecuted $query) use (&$created) {
+        if (! $created && str_starts_with($query->sql, 'select') && str_contains($query->sql, '"end_users"')) {
+            $created = true;
+            EndUser::factory()->create([
+                'project_id' => $this->project->id,
+                'identifier' => 'user-1',
+                'name' => 'Jane Example',
+                'email' => 'jane@example.com',
+            ]);
+        }
+    });
+
+    postNightwatchRecords([nightwatchException($this->base, 'trace-1')], $this->token)->assertOk();
+
+    expect($created)->toBeTrue()
+        ->and(ErrorOccurrence::sole())
+        ->user_name->toBe('Jane Example')
+        ->user_email->toBe('jane@example.com');
+});
+
+it('leaves a request without details when no end user exists', function () {
+    postNightwatchRecords([nightwatchRequest($this->base, 'trace-1')], $this->token)->assertOk();
+
+    expect(Trace::where('correlation_id', 'trace-1')->sole())
+        ->user_name->toBeNull()
+        ->user_email->toBeNull();
+});
+
+it('lists a user once in the request and exception filters when their email changed', function () {
+    $range = TimeRange::fromLabel('24h');
+
+    foreach (['jane@example.com', 'jane.new@example.com'] as $i => $email) {
+        Trace::factory()->create([
+            'project_id' => $this->project->id,
+            'user_identifier' => 'user-1',
+            'user_email' => $email,
+            'occurred_at' => now()->subMinutes($i + 1),
+        ]);
+        ErrorOccurrence::factory()->create([
+            'project_id' => $this->project->id,
+            'user_identifier' => 'user-1',
+            'user_email' => $email,
+            'occurred_at' => now()->subMinutes($i + 1),
+        ]);
+    }
+
+    $requestUsers = (new RequestStats)->topUsers($this->project, $range);
+    $exceptionUsers = (new ExceptionStats)->topUsers($this->project, $range);
+
+    expect($requestUsers)->toHaveCount(1)
+        ->and($requestUsers[0]['id'])->toBe('user-1')
+        ->and($requestUsers[0]['count'])->toBe(2)
+        ->and($requestUsers[0]['email'])->toBeIn(['jane@example.com', 'jane.new@example.com'])
+        ->and($exceptionUsers)->toHaveCount(1)
+        ->and($exceptionUsers[0]['id'])->toBe('user-1')
+        ->and($exceptionUsers[0]['count'])->toBe(2)
+        ->and($exceptionUsers[0]['email'])->toBeIn(['jane@example.com', 'jane.new@example.com']);
 });
