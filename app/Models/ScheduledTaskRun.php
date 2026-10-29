@@ -11,6 +11,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'project_id',
     'task',
     'task_hash',
+    'lazy_loads',
+    'hydrated_models',
     'schedule',
     'schedule_summary',
     'next_run_at',
@@ -37,6 +39,8 @@ class ScheduledTaskRun extends Model
     {
         return [
             'exit_code' => 'integer',
+            'lazy_loads' => 'integer',
+            'hydrated_models' => 'integer',
             'duration_ms' => 'integer',
             'threshold_ms' => 'integer',
             'memory_peak_kb' => 'integer',

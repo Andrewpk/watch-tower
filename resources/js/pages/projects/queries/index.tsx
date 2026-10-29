@@ -66,6 +66,8 @@ type QueryRow = {
     total_ms: number;
     avg_ms: number | null;
     p95_ms: number | null;
+    location: string | null;
+    locations_count: number;
 };
 
 type Props = {
@@ -273,6 +275,16 @@ function QueryRowTr({ row, slug }: { row: QueryRow; slug: string }) {
                     <Database className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
                     <SqlPreview sql={row.sql} />
                 </Link>
+                {row.location && (
+                    <div
+                        className="mt-0.5 truncate pl-[22px] font-mono text-[11px] text-muted-foreground"
+                        title={row.location}
+                    >
+                        {row.location}
+                        {row.locations_count > 1 &&
+                            ` +${row.locations_count - 1} more`}
+                    </div>
+                )}
             </TableCell>
             <TableCell className="py-2.5 font-mono text-xs text-muted-foreground">
                 {row.connection ?? '—'}

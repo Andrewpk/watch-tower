@@ -66,11 +66,26 @@ class NightwatchTranslator
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'db_queries_count' => $this->unsignedCount($r['queries'] ?? null),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'memory_used_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'release' => $this->limit($r['deploy'] ?? null, 255),
                 'hostname' => $this->limit($r['server'] ?? null, 255),
                 'ip_address' => $this->limit($r['ip'] ?? null, 45),
+                'route_name' => $this->limit($r['route_name'] ?? null, 255),
+                'route_methods' => $this->routeMethods($r['route_methods'] ?? null),
+                'route_domain' => $this->limit($r['route_domain'] ?? null, 255),
+                'route_action' => $this->limit($r['route_action'] ?? null, 255),
+                'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4_294_967_295),
+                'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4_294_967_295),
+                'bootstrap_ms' => $this->microsToFractionalMillis($r['bootstrap'] ?? null),
+                'before_middleware_ms' => $this->microsToFractionalMillis($r['before_middleware'] ?? null),
+                'action_ms' => $this->microsToFractionalMillis($r['action'] ?? null),
+                'render_ms' => $this->microsToFractionalMillis($r['render'] ?? null),
+                'after_middleware_ms' => $this->microsToFractionalMillis($r['after_middleware'] ?? null),
+                'sending_ms' => $this->microsToFractionalMillis($r['sending'] ?? null),
+                'terminating_ms' => $this->microsToFractionalMillis($r['terminating'] ?? null),
                 'headers' => $this->decodeMaybeJson($r['headers'] ?? null),
                 'request_data' => $this->decodeMaybeJson($r['payload'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
@@ -89,6 +104,9 @@ class NightwatchTranslator
      */
     private function translateQuery(array $r): array
     {
+        $file = $this->limit($r['file'] ?? null, 255);
+        $line = $file === null ? null : $this->boundedInt($r['line'] ?? null, 4_294_967_295);
+
         return [
             'type' => 'query',
             'id' => $this->scalarString($r['_group'] ?? null),
@@ -98,6 +116,9 @@ class NightwatchTranslator
                 'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'sql' => mb_strcut($this->scalarString($r['sql'] ?? null), 0, 65_535, 'UTF-8'),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
+                'file' => $file,
+                'line' => $line === 0 ? null : $line,
+                'connection_type' => $this->limit($r['connection_type'] ?? null, 10),
                 'duration_ms' => $this->microsToFractionalMillis($r['duration'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -116,6 +137,23 @@ class NightwatchTranslator
         }
 
         return min(round(max(0, (float) $value) / 1000, 3), 999_999_999.999);
+    }
+
+    /**
+     * The route's HTTP methods as one string such as `GET|HEAD` (the join Nightwatch uses for its own route group
+     * key). Non-string entries are dropped; an empty list is null.
+     */
+    private function routeMethods(mixed $value): ?string
+    {
+        if (! is_array($value)) {
+            $string = $this->limit($value, 100);
+
+            return $string === null ? null : strtoupper($string);
+        }
+
+        $methods = array_filter($value, fn (mixed $method): bool => is_string($method) && $method !== '');
+
+        return $methods === [] ? null : mb_substr(strtoupper(implode('|', $methods)), 0, 100);
     }
 
     /**
@@ -251,6 +289,8 @@ class NightwatchTranslator
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'status' => $status,
                 'attempts' => $this->unsignedCount($r['attempt'] ?? null, 1),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'started_at' => $this->timestampToIso($r['timestamp'] ?? null),
                 'completed_at' => $status === 'completed' ? $finishedAt : null,
                 'failed_at' => $status === 'failed' ? $finishedAt : null,
@@ -297,9 +337,14 @@ class NightwatchTranslator
                 'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'arguments' => $arguments,
                 'options' => $options,
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
                 'exit_code' => $exitCode,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'bootstrap_ms' => $this->microsToFractionalMillis($r['bootstrap'] ?? null),
+                'action_ms' => $this->microsToFractionalMillis($r['action'] ?? null),
+                'terminating_ms' => $this->microsToFractionalMillis($r['terminating'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -325,13 +370,15 @@ class NightwatchTranslator
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'task' => $this->limit($r['name'] ?? null, 255),
                 'task_hash' => $this->scheduledTaskHash($r),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'schedule' => $this->limit($r['cron'] ?? null, 255),
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
                 'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
                 'memory_peak_kb' => $status === 'skipped' ? null : $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'timezone' => $this->limit($r['timezone'] ?? null, 64),
-                'repeat_seconds' => $this->repeatIntervalOrNull($r['repeat_seconds'] ?? null),
+                'repeat_seconds' => $this->boundedInt($r['repeat_seconds'] ?? null, 65_535),
                 'without_overlapping' => $this->boolOrNull($r['without_overlapping'] ?? null),
                 'on_one_server' => $this->boolOrNull($r['on_one_server'] ?? null),
                 'run_in_background' => $this->boolOrNull($r['run_in_background'] ?? null),
@@ -387,21 +434,6 @@ class NightwatchTranslator
         $repeatSeconds = $this->repeatSeconds($r);
 
         return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
-    }
-
-    /**
-     * The repeat interval for the `unsignedSmallInteger` column: null when it is not numeric or falls outside
-     * 0..65535. The range is checked as a float first, because casting `1e20` or `INF` to int throws on PHP 8.5.
-     */
-    private function repeatIntervalOrNull(mixed $value): ?int
-    {
-        if (! is_numeric($value)) {
-            return null;
-        }
-
-        $seconds = (float) $value;
-
-        return is_finite($seconds) && $seconds >= 0 && $seconds <= 65_535 ? (int) $seconds : null;
     }
 
     /**
@@ -482,6 +514,16 @@ class NightwatchTranslator
         }
 
         return (int) max(0.0, min(floor((float) $value), 4_294_967_295.0));
+    }
+
+    /**
+     * Like unsignedCount(), but a missing or non-numeric value is null rather than 0: a record from an older sensor
+     * that does not report the count must not be stored as having none. A negative count is clamped to 0 here,
+     * while the legacy ingest path stores it as null.
+     */
+    private function unsignedCountOrNull(mixed $value): ?int
+    {
+        return is_numeric($value) ? $this->unsignedCount($value) : null;
     }
 
     private function scalarString(mixed $value): string
@@ -614,9 +656,9 @@ class NightwatchTranslator
             return null;
         }
 
-        $int = (int) $value;
+        $number = (float) $value;
 
-        return $int >= 0 && $int <= $max ? $int : null;
+        return is_finite($number) && $number >= 0 && $number <= $max ? (int) $number : null;
     }
 
     /**

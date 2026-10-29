@@ -71,7 +71,8 @@ class EventStore
      * value X and X plus the query sum: the request record overwrites what earlier queries added, and later queries
      * add on top. When the request
      * carries a user but no details were known while storing it, the end user is read again afterwards, see
-     * `completeUserDetails()`.
+     * `completeUserDetails()`. The route details, sizes and stage timings are only written when present, so a
+     * request record without them (a legacy client) does not erase what an earlier record stored.
      *
      * @param  array<string, mixed>  $data
      */
@@ -94,12 +95,31 @@ class EventStore
             ...$userDetails,
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
             'db_queries_count' => (int) ($data['db_queries_count'] ?? 0),
+            ...array_filter([
+                'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'memory_used_kb' => $this->intOrNull($data['memory_used_kb'] ?? null),
             'memory_peak_kb' => $this->intOrNull($data['memory_peak_kb'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
             'release_version' => $this->stringOrNull($data['release'] ?? null),
             'hostname' => $this->stringOrNull($data['hostname'] ?? null),
             'ip_address' => $this->stringOrNull($data['ip_address'] ?? null),
+            ...array_filter([
+                'route_name' => $this->limitedString($data['route_name'] ?? null, 255),
+                'route_methods' => $this->routeMethodsOrNull($data['route_methods'] ?? null),
+                'route_domain' => $this->limitedString($data['route_domain'] ?? null, 255),
+                'route_action' => $this->limitedString($data['route_action'] ?? null, 255),
+                'request_size_bytes' => $this->unsignedIntOrNull($data['request_size_bytes'] ?? null),
+                'response_size_bytes' => $this->unsignedIntOrNull($data['response_size_bytes'] ?? null),
+                'bootstrap_ms' => $this->fractionalMsOrNull($data['bootstrap_ms'] ?? null),
+                'before_middleware_ms' => $this->fractionalMsOrNull($data['before_middleware_ms'] ?? null),
+                'action_ms' => $this->fractionalMsOrNull($data['action_ms'] ?? null),
+                'render_ms' => $this->fractionalMsOrNull($data['render_ms'] ?? null),
+                'after_middleware_ms' => $this->fractionalMsOrNull($data['after_middleware_ms'] ?? null),
+                'sending_ms' => $this->fractionalMsOrNull($data['sending_ms'] ?? null),
+                'terminating_ms' => $this->fractionalMsOrNull($data['terminating_ms'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'user_agent' => $this->stringOrNull($data['user_agent'] ?? null),
             'headers' => $data['headers'] ?? null,
             'request_data' => $data['request_data'] ?? null,
@@ -150,8 +170,9 @@ class EventStore
         }
 
         $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
+        $file = $this->limitedString($data['file'] ?? null, 255);
 
-        DB::transaction(function () use ($trace, $durationMs, $project, $data): void {
+        DB::transaction(function () use ($trace, $durationMs, $file, $project, $data): void {
             if ($durationMs > 0) {
                 Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);
             }
@@ -163,6 +184,9 @@ class EventStore
                 'sql' => (string) ($data['sql'] ?? ''),
                 'bindings' => $data['bindings'] ?? null,
                 'connection_name' => $this->stringOrNull($data['connection'] ?? null),
+                'file' => $file,
+                'line' => $file === null ? null : ($this->unsignedIntOrNull($data['line'] ?? null) ?: null),
+                'connection_type' => $this->limitedString($data['connection_type'] ?? null, 10),
                 'duration_ms' => $durationMs,
                 'row_count' => $this->intOrNull($data['row_count'] ?? null),
                 'is_n_plus_one' => (bool) ($data['is_n_plus_one'] ?? false),
@@ -368,8 +392,9 @@ class EventStore
      * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
      *
      * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
-     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. A newer attempt that reports
-     * no peak memory keeps the previous attempt's value.
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. Per-attempt metrics (peak memory
+     * and the lazy load and hydrated model counts) follow the same rule, and an attempt that does not carry them leaves
+     * the stored values alone: a newer attempt without them keeps the previous attempt's values.
      *
      * @param  array<string, mixed>  $data
      */
@@ -390,6 +415,10 @@ class EventStore
             'completed_at' => $this->parseTimestamp($data['completed_at'] ?? null, allowNull: true),
             'failed_at' => $this->parseTimestamp($data['failed_at'] ?? null, allowNull: true),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            ...array_filter([
+                'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'exception' => $data['exception'] ?? null,
         ];
 
@@ -484,9 +513,14 @@ class EventStore
             'memory_peak_kb' => $this->unsignedIntOrNull($data['memory_peak_kb'] ?? null),
             'arguments' => is_array($data['arguments'] ?? null) ? $data['arguments'] : null,
             'options' => is_array($data['options'] ?? null) ? $data['options'] : null,
+            'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+            'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
             'status' => $this->stringOrNull($data['status'] ?? null) ?? 'completed',
             'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'bootstrap_ms' => $this->fractionalMsOrNull($data['bootstrap_ms'] ?? null),
+            'action_ms' => $this->fractionalMsOrNull($data['action_ms'] ?? null),
+            'terminating_ms' => $this->fractionalMsOrNull($data['terminating_ms'] ?? null),
             'output' => $this->stringOrNull($data['output'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
             'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
@@ -508,6 +542,8 @@ class EventStore
             'project_id' => $project->id,
             'task' => $task,
             'task_hash' => $suppliedHash !== null && preg_match('/^[0-9a-f]{40}$/i', $suppliedHash) ? $suppliedHash : sha1($task),
+            'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
+            'hydrated_models' => $this->unsignedIntOrNull($data['hydrated_models'] ?? null),
             'schedule' => $this->stringOrNull($data['schedule'] ?? null),
             'schedule_summary' => $this->stringOrNull($data['schedule_summary'] ?? null),
             'next_run_at' => $this->parseTimestamp($data['next_run_at'] ?? null, allowNull: true),
@@ -800,6 +836,34 @@ class EventStore
         }
 
         return mb_substr((string) $value, 0, $length);
+    }
+
+    /**
+     * The route methods as one upper-case string such as `GET|HEAD`: a list is joined with a pipe, dropping entries
+     * that are not non-empty strings. Null when nothing is left.
+     */
+    private function routeMethodsOrNull(mixed $value): ?string
+    {
+        if (is_array($value)) {
+            $value = implode('|', array_filter($value, fn (mixed $method): bool => is_string($method) && $method !== ''));
+        }
+
+        $methods = $this->limitedString($value, 100);
+
+        return $methods === null ? null : strtoupper($methods);
+    }
+
+    /**
+     * Milliseconds for a `decimal(12,3)` column: null unless the value is a finite number, negatives become zero and
+     * huge values are held at the column maximum.
+     */
+    private function fractionalMsOrNull(mixed $value): ?float
+    {
+        if (! is_numeric($value) || ! is_finite((float) $value)) {
+            return null;
+        }
+
+        return min(round(max(0.0, (float) $value), 3), 999_999_999.999);
     }
 
     /**

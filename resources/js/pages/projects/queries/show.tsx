@@ -17,6 +17,14 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
 import { AppLayout } from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import queriesRoutes from '@/routes/projects/queries';
@@ -33,6 +41,15 @@ type Detail = {
     sql: string;
     hash: string;
     connection: string | null;
+    connection_types: string[];
+    locations_total: number;
+    locations: {
+        file: string;
+        line: number | null;
+        total: number;
+        total_ms: number;
+        avg_ms: number | null;
+    }[];
     totals: {
         total: number;
         total_ms: number;
@@ -46,6 +63,9 @@ type Detail = {
         id: string;
         duration_ms: number;
         row_count: number | null;
+        file: string | null;
+        line: number | null;
+        connection_type: string | null;
         is_slow: boolean;
         is_n_plus_one: boolean;
         occurred_at: string | null;
@@ -98,6 +118,11 @@ export default function QueryShow({ detail, selectedRange }: Props) {
                     <InfoCard detail={detail} />
                     <SqlCard sql={detail.sql} connection={detail.connection} />
                 </div>
+
+                <LocationsCard
+                    locations={detail.locations}
+                    total={detail.locations_total}
+                />
             </div>
         </AppLayout>
     );
@@ -339,6 +364,13 @@ function InfoCard({ detail }: { detail: Detail }) {
                             mono
                         />
                     ) : null}
+                    {detail.connection_types.length > 0 ? (
+                        <InfoRow
+                            label="Connection type"
+                            value={detail.connection_types.join(', ')}
+                            mono
+                        />
+                    ) : null}
                 </dl>
 
                 {detail.calls.length > 0 ? (
@@ -348,39 +380,130 @@ function InfoCard({ detail }: { detail: Detail }) {
                         </div>
                         <ul className="space-y-1.5 text-xs">
                             {detail.calls.slice(0, 6).map((call) => (
-                                <li
-                                    key={call.id}
-                                    className="flex items-center justify-between gap-3 font-mono"
-                                >
-                                    <span className="text-muted-foreground">
-                                        {formatStamp(call.occurred_at)}
-                                    </span>
-                                    <span className="flex items-center gap-2">
-                                        {call.is_slow ? (
-                                            <Badge
-                                                variant="warning"
-                                                className="px-1.5 py-0 text-[9px]"
-                                            >
-                                                slow
-                                            </Badge>
-                                        ) : null}
-                                        {call.is_n_plus_one ? (
-                                            <Badge
-                                                variant="destructive"
-                                                className="px-1.5 py-0 text-[9px]"
-                                            >
-                                                N+1
-                                            </Badge>
-                                        ) : null}
-                                        <span className="tabular-nums">
-                                            {formatMs(call.duration_ms)}
+                                <li key={call.id} className="font-mono">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-muted-foreground">
+                                            {formatStamp(call.occurred_at)}
                                         </span>
-                                    </span>
+                                        <span className="flex items-center gap-2">
+                                            {call.is_slow ? (
+                                                <Badge
+                                                    variant="warning"
+                                                    className="px-1.5 py-0 text-[9px]"
+                                                >
+                                                    slow
+                                                </Badge>
+                                            ) : null}
+                                            {call.is_n_plus_one ? (
+                                                <Badge
+                                                    variant="destructive"
+                                                    className="px-1.5 py-0 text-[9px]"
+                                                >
+                                                    N+1
+                                                </Badge>
+                                            ) : null}
+                                            <span className="tabular-nums">
+                                                {formatMs(call.duration_ms)}
+                                            </span>
+                                        </span>
+                                    </div>
+                                    {call.file || call.connection_type ? (
+                                        <div className="mt-0.5 flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+                                            <span
+                                                className="min-w-0 truncate"
+                                                title={formatLocation(
+                                                    call.file,
+                                                    call.line,
+                                                )}
+                                            >
+                                                {formatLocation(
+                                                    call.file,
+                                                    call.line,
+                                                )}
+                                            </span>
+                                            {call.connection_type ? (
+                                                <Badge
+                                                    variant="muted"
+                                                    className="shrink-0 px-1.5 py-0 text-[9px]"
+                                                >
+                                                    {call.connection_type}
+                                                </Badge>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
                                 </li>
                             ))}
                         </ul>
                     </div>
                 ) : null}
+            </CardContent>
+        </Card>
+    );
+}
+
+function LocationsCard({
+    locations,
+    total,
+}: {
+    locations: Detail['locations'];
+    total: number;
+}) {
+    return (
+        <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle>Locations</CardTitle>
+                {total > locations.length ? (
+                    <span className="text-[10px] tracking-wider text-muted-foreground uppercase">
+                        Showing {locations.length} of {formatNumber(total)}
+                    </span>
+                ) : null}
+            </CardHeader>
+            <Separator />
+            <CardContent className="p-0">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Location</TableHead>
+                            <TableHead className="text-right">Calls</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead className="text-right">Avg</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {locations.length === 0 ? (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={4}
+                                    className="py-6 text-center text-sm text-muted-foreground"
+                                >
+                                    No code location reported for this query
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            locations.map((location) => (
+                                <TableRow
+                                    key={`${location.file}:${location.line}`}
+                                >
+                                    <TableCell className="py-2 font-mono text-xs">
+                                        {formatLocation(
+                                            location.file,
+                                            location.line,
+                                        )}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right tabular-nums">
+                                        {formatNumber(location.total)}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right text-muted-foreground tabular-nums">
+                                        {formatMs(location.total_ms)}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right text-muted-foreground tabular-nums">
+                                        {formatMs(location.avg_ms)}
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
             </CardContent>
         </Card>
     );
@@ -647,6 +770,14 @@ function InfoRow({
             </dd>
         </div>
     );
+}
+
+function formatLocation(file: string | null, line: number | null): string {
+    if (file === null) {
+        return '';
+    }
+
+    return line === null ? file : `${file}:${line}`;
 }
 
 function formatNumber(value: number): string {

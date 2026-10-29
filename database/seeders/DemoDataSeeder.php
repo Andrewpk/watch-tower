@@ -105,6 +105,17 @@ class DemoDataSeeder extends Seeder
             $hasUser = random_int(1, 100) <= 80;
             $endUser = $hasUser ? $endUsers[array_rand($endUsers)] : null;
 
+            $routeDetails = $this->routeDetails($method, $uri);
+            $stages = $this->splitIntoStages($duration, [
+                'bootstrap_ms' => 10,
+                'before_middleware_ms' => 8,
+                'action_ms' => 55,
+                'render_ms' => 10,
+                'after_middleware_ms' => 4,
+                'sending_ms' => 3,
+                'terminating_ms' => 10,
+            ]);
+
             $traces[] = [
                 'id' => (string) Str::uuid(),
                 'project_id' => $project->id,
@@ -117,6 +128,7 @@ class DemoDataSeeder extends Seeder
                 'user_name' => $endUser['name'] ?? null,
                 'duration_ms' => $duration,
                 'db_queries_count' => random_int(0, 18),
+                ...$this->modelCounts(),
                 'db_time_ms' => random_int(0, max(1, (int) ($duration / 3))),
                 'memory_used_kb' => random_int(2_048, 32_768),
                 'memory_peak_kb' => random_int(4_096, 65_536),
@@ -124,6 +136,13 @@ class DemoDataSeeder extends Seeder
                 'release_version' => 'v1.4.2',
                 'hostname' => 'web-'.random_int(1, 3),
                 'ip_address' => '203.0.113.'.random_int(1, 254),
+                'route_name' => $routeDetails['name'],
+                'route_methods' => $routeDetails['methods'],
+                'route_domain' => null,
+                'route_action' => $routeDetails['action'],
+                'request_size_bytes' => random_int(200, 4_096),
+                'response_size_bytes' => random_int(300, 65_536),
+                ...$stages,
                 'user_agent' => 'Mozilla/5.0 (compatible; Demo/1.0)',
                 'headers' => json_encode(['accept' => 'application/json']),
                 'request_data' => json_encode([]),
@@ -150,6 +169,59 @@ class DemoDataSeeder extends Seeder
         $this->seedCache($project, $start);
         $this->seedOutgoingRequests($project, $start);
         $this->seedLogs($project, $start, $teamUsers);
+    }
+
+    /**
+     * The route name, action and methods the demo traces report for a method and URI.
+     *
+     * @return array{name: string|null, action: string, methods: string}
+     */
+    private function routeDetails(string $method, string $uri): array
+    {
+        $controller = match (true) {
+            str_starts_with($uri, '/api/users') => 'UserController',
+            str_starts_with($uri, '/api/orders') => 'OrderController',
+            str_starts_with($uri, '/api/payments') => 'PaymentController',
+            str_starts_with($uri, '/api/reports') => 'ReportController',
+            str_starts_with($uri, '/api/search') => 'SearchController',
+            str_starts_with($uri, '/api/products') => 'ProductController',
+            str_starts_with($uri, '/api/checkout') => 'CheckoutController',
+            str_starts_with($uri, '/api/notifications') => 'NotificationController',
+            $uri === '/dashboard' => 'DashboardController',
+            default => 'SettingsController',
+        };
+
+        $hasId = str_contains($uri, '{id}');
+        $action = match ($method) {
+            'GET' => $hasId || $uri === '/dashboard' || $uri === '/settings' ? 'show' : 'index',
+            'POST' => 'store',
+            'PUT' => 'update',
+            default => 'destroy',
+        };
+
+        $resource = str_contains($uri, '/api/') ? substr($uri, 5) : substr($uri, 1);
+        $resource = str_replace(['/{id}', '/'], ['', '.'], $resource);
+
+        return [
+            'name' => $resource.'.'.$action,
+            'action' => 'App\\Http\\Controllers\\'.$controller.'@'.$action,
+            'methods' => $method === 'GET' ? 'GET|HEAD' : $method,
+        ];
+    }
+
+    /**
+     * Split a duration into stage timings in fractional milliseconds, following the given weights with some jitter.
+     * The stages add up to the duration.
+     *
+     * @param  array<string, int>  $weights
+     * @return array<string, float>
+     */
+    private function splitIntoStages(int|float $duration, array $weights): array
+    {
+        $jittered = array_map(fn (int $weight): float => $weight * (random_int(70, 130) / 100), $weights);
+        $sum = array_sum($jittered);
+
+        return array_map(fn (float $weight): float => round($duration * $weight / $sum, 3), $jittered);
     }
 
     /**
@@ -502,6 +574,7 @@ class DemoDataSeeder extends Seeder
                     'sql' => $template['sql'],
                     'bindings' => json_encode([]),
                     'connection_name' => $template['connection'],
+                    ...$this->queryLocation($template),
                     'duration_ms' => round($duration, 3),
                     'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                     'is_n_plus_one' => $totalCalls > 1200 && random_int(1, 4) === 1,
@@ -535,6 +608,7 @@ class DemoDataSeeder extends Seeder
                 'sql' => $template['sql'],
                 'bindings' => json_encode([]),
                 'connection_name' => $template['connection'],
+                ...$this->queryLocation($template),
                 'duration_ms' => round($duration, 3),
                 'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                 'is_n_plus_one' => false,
@@ -555,6 +629,49 @@ class DemoDataSeeder extends Seeder
         if ($rows !== []) {
             TraceQuery::query()->insert($rows);
         }
+    }
+
+    /**
+     * Lazy load and hydrated model counts for one run; about a quarter of the runs have lazy loads.
+     *
+     * @return array{lazy_loads: int, hydrated_models: int}
+     */
+    private function modelCounts(): array
+    {
+        $lazyLoads = random_int(1, 4) === 1 ? random_int(1, 40) : 0;
+
+        return [
+            'lazy_loads' => $lazyLoads,
+            'hydrated_models' => $lazyLoads + random_int(0, 250),
+        ];
+    }
+
+    /**
+     * Where a query template ran from: each template gets two or three fixed call sites, picked at random per call,
+     * and `read` or `write` as its connection type.
+     *
+     * @param  array{sql: string, type: string}  $template
+     * @return array{file: string, line: int, connection_type: string}
+     */
+    private function queryLocation(array $template): array
+    {
+        $files = [
+            'app/Http/Controllers/OrderController.php',
+            'app/Http/Controllers/ProductController.php',
+            'app/Services/CheckoutService.php',
+            'app/Jobs/SyncInventory.php',
+            'app/Models/User.php',
+            'app/Console/Commands/PruneRecords.php',
+        ];
+
+        $seed = crc32($template['sql']);
+        $site = random_int(0, 1 + $seed % 2);
+
+        return [
+            'file' => $files[($seed + $site) % count($files)],
+            'line' => 20 + (($seed >> 3) + $site * 37) % 180,
+            'connection_type' => $template['type'] === 'select' ? 'read' : 'write',
+        ];
     }
 
     /**
@@ -637,6 +754,7 @@ class DemoDataSeeder extends Seeder
                 'failed_at' => $failedAt,
                 'duration_ms' => $status === 'queued' ? null : $duration,
                 'attempts' => $status === 'failed' ? random_int(2, 3) : ($status === 'queued' ? 0 : 1),
+                ...($status === 'queued' ? ['lazy_loads' => null, 'hydrated_models' => null] : $this->modelCounts()),
                 'status' => $status,
                 'payload' => json_encode([]),
                 'user_identifier' => $jobUser['id'] ?? null,
@@ -683,6 +801,12 @@ class DemoDataSeeder extends Seeder
             $offsetSeconds = random_int(0, 86_400);
             $occurredAt = $start->addSeconds($offsetSeconds);
 
+            $stages = $this->splitIntoStages($duration, [
+                'bootstrap_ms' => 8,
+                'action_ms' => 88,
+                'terminating_ms' => 4,
+            ]);
+
             $rows[] = [
                 'id' => (string) Str::uuid(),
                 'project_id' => $project->id,
@@ -690,9 +814,11 @@ class DemoDataSeeder extends Seeder
                 'memory_peak_kb' => random_int(14_000, 128_000),
                 'arguments' => json_encode([]),
                 'options' => json_encode(['--quiet' => false]),
+                ...$this->modelCounts(),
                 'status' => $status,
                 'exit_code' => $exitCode,
                 'duration_ms' => $duration,
+                ...$stages,
                 'output' => $failed
                     ? "Error: process exited with code {$exitCode}\n  at ".$tpl['command']
                     : "Completed {$tpl['command']} in {$duration}ms",
@@ -799,6 +925,7 @@ class DemoDataSeeder extends Seeder
                     'project_id' => $project->id,
                     'task' => $tpl['task'],
                     'task_hash' => $hash,
+                    ...($status === 'skipped' ? ['lazy_loads' => null, 'hydrated_models' => null] : $this->modelCounts()),
                     'schedule' => $tpl['schedule'],
                     'schedule_summary' => $tpl['schedule_summary'],
                     'next_run_at' => $tpl['next_run_at'],

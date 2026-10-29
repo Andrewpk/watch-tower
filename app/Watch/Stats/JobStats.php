@@ -137,7 +137,7 @@ class JobStats
      *   totals: array{total:int,queued:int,processed:int,released:int,failed:int},
      *   duration: array{min_ms: int|null, max_ms: int|null, avg_ms: float|null, p95_ms: float|null, threshold_ms: int|null},
      *   buckets: list<array{bucket:string,processed:int,released:int,failed:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   attempts: list<array{id:string,memory_peak_kb:int|null,connection:string|null,queue:string|null,attempt:int,status:string,duration_ms:int|null,occurred_at:string|null}>
+     *   attempts: list<array{id:string,memory_peak_kb:int|null,connection:string|null,queue:string|null,attempt:int,status:string,duration_ms:int|null,lazy_loads:int|null,hydrated_models:int|null,occurred_at:string|null}>
      * }|null
      */
     public function jobDetail(Project $project, TimeRange $range, string $jobClass): ?array
@@ -153,7 +153,7 @@ class JobStats
         $attempts = (clone $base)
             ->orderByDesc('created_at')
             ->limit(200)
-            ->get(['id', 'memory_peak_kb', 'connection', 'queue', 'attempts', 'status', 'duration_ms', 'created_at'])
+            ->get(['id', 'memory_peak_kb', 'connection', 'queue', 'attempts', 'status', 'duration_ms', 'lazy_loads', 'hydrated_models', 'created_at'])
             ->map(fn (QueueJobRun $run) => [
                 'id' => $run->id,
                 'memory_peak_kb' => $run->memory_peak_kb,
@@ -162,6 +162,8 @@ class JobStats
                 'attempt' => (int) $run->attempts,
                 'status' => $run->status,
                 'duration_ms' => $run->duration_ms,
+                'lazy_loads' => $run->lazy_loads,
+                'hydrated_models' => $run->hydrated_models,
                 'occurred_at' => $run->created_at?->toIso8601String(),
             ])
             ->all();
