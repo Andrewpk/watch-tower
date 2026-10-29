@@ -105,7 +105,7 @@ class RequestStats
      *   totals: array{total:int, success:int, client_error:int, server_error:int},
      *   duration: array{avg_ms: float|null, p95_ms: float|null},
      *   buckets: list<array{bucket:string,success:int,client_error:int,server_error:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   recent: list<array{id:string,status_code:int|null,duration_ms:int|null,occurred_at:string|null,user_identifier:string|null}>
+     *   recent: list<array{id:string,lazy_loads:int|null,hydrated_models:int|null,status_code:int|null,duration_ms:int|null,occurred_at:string|null,user_identifier:string|null}>
      * }|null
      */
     public function routeDetail(Project $project, TimeRange $range, string $method, string $uri, ?string $userId = null): ?array
@@ -134,9 +134,11 @@ class RequestStats
         $recent = (clone $base)
             ->orderByDesc('occurred_at')
             ->limit(20)
-            ->get(['id', 'method', 'uri', 'status_code', 'duration_ms', 'occurred_at', 'user_identifier'])
+            ->get(['id', 'lazy_loads', 'hydrated_models', 'method', 'uri', 'status_code', 'duration_ms', 'occurred_at', 'user_identifier'])
             ->map(fn (Trace $trace) => [
                 'id' => $trace->id,
+                'lazy_loads' => $trace->lazy_loads,
+                'hydrated_models' => $trace->hydrated_models,
                 'method' => $trace->method,
                 'uri' => $trace->uri,
                 'status_code' => $trace->status_code,

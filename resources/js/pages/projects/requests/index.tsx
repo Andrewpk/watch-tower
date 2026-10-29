@@ -21,6 +21,7 @@ import {
     YAxis,
 } from 'recharts';
 
+import { ModelCounts } from '@/components/model-counts';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -89,6 +90,8 @@ type RouteDetail = {
     buckets: Bucket[];
     recent: Array<{
         id: string;
+        lazy_loads: number | null;
+        hydrated_models: number | null;
         status_code: number | null;
         duration_ms: number | null;
         occurred_at: string | null;
@@ -842,6 +845,9 @@ function RouteDetailPanel({
                                             Duration
                                         </TableHead>
                                         <TableHead>User</TableHead>
+                                        <TableHead className="text-right">
+                                            Lazy / Models
+                                        </TableHead>
                                         <TableHead>When</TableHead>
                                     </TableRow>
                                 </TableHeader>
@@ -849,7 +855,7 @@ function RouteDetailPanel({
                                     {detail.recent.length === 0 ? (
                                         <TableRow>
                                             <TableCell
-                                                colSpan={4}
+                                                colSpan={5}
                                                 className="py-6 text-center text-sm text-muted-foreground"
                                             >
                                                 No recent requests
@@ -873,6 +879,16 @@ function RouteDetailPanel({
                                                 <TableCell className="py-2 font-mono text-xs text-muted-foreground">
                                                     {trace.user_identifier ??
                                                         '—'}
+                                                </TableCell>
+                                                <TableCell className="py-2 text-right font-mono text-xs">
+                                                    <ModelCounts
+                                                        lazyLoads={
+                                                            trace.lazy_loads
+                                                        }
+                                                        hydratedModels={
+                                                            trace.hydrated_models
+                                                        }
+                                                    />
                                                 </TableCell>
                                                 <TableCell className="py-2 text-xs text-muted-foreground">
                                                     {formatRelative(

@@ -11,7 +11,7 @@ use Illuminate\Pagination\LengthAwarePaginator;
 class QueryStats
 {
     /**
-     * @return LengthAwarePaginator<array-key, array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null}>
+     * @return LengthAwarePaginator<array-key, array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null,location:string|null,locations_count:int}>
      */
     public function paginatedQueries(
         Project $project,
@@ -76,7 +76,7 @@ class QueryStats
     }
 
     /**
-     * @return list<array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null}>
+     * @return list<array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null,location:string|null,locations_count:int}>
      */
     public function queries(Project $project, TimeRange $range, ?string $search = null): array
     {
@@ -96,11 +96,13 @@ class QueryStats
             ->get();
 
         $durationsBySql = $this->durationsBySql($project, $range, $search);
+        $locationsBySql = $this->locationsBySql($project, $range, $search);
 
         return $rows
-            ->map(function ($row) use ($durationsBySql) {
+            ->map(function ($row) use ($durationsBySql, $locationsBySql) {
                 $sql = (string) $row->sql;
                 $durations = $durationsBySql[$sql] ?? [];
+                $locations = $locationsBySql[$sql] ?? [];
 
                 return [
                     'hash' => sha1($sql),
@@ -110,6 +112,8 @@ class QueryStats
                     'total_ms' => (float) $row->total_ms,
                     'avg_ms' => $row->avg_ms !== null ? (float) $row->avg_ms : null,
                     'p95_ms' => $this->percentile($durations, 0.95),
+                    'location' => $locations === [] ? null : $this->formatLocation($locations[0]['file'], $locations[0]['line']),
+                    'locations_count' => count($locations),
                 ];
             })
             ->sortByDesc('total_ms')
@@ -122,9 +126,11 @@ class QueryStats
      *   sql:string,
      *   hash:string,
      *   connection:string|null,
+     *   connection_types: list<string>,
+     *   locations: list<array{file:string,line:int|null,total:int,total_ms:float,avg_ms:float|null}>,
      *   totals: array{total:int,total_ms:float,min_ms:float|null,max_ms:float|null,avg_ms:float|null,p95_ms:float|null},
      *   buckets: list<array{bucket:string,count:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   calls: list<array{id:string,duration_ms:float,row_count:int|null,is_slow:bool,is_n_plus_one:bool,occurred_at:string|null}>
+     *   calls: list<array{id:string,duration_ms:float,row_count:int|null,file:string|null,line:int|null,connection_type:string|null,is_slow:bool,is_n_plus_one:bool,occurred_at:string|null}>
      * }|null
      */
     public function queryDetail(Project $project, TimeRange $range, string $hash): ?array
@@ -150,17 +156,52 @@ class QueryStats
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->value('connection_name');
 
+        $connectionTypes = TraceQuery::query()
+            ->where('project_id', $project->id)
+            ->where('sql', $sql)
+            ->whereBetween('occurred_at', [$range->from, $range->to])
+            ->whereNotNull('connection_type')
+            ->distinct()
+            ->orderBy('connection_type')
+            ->pluck('connection_type')
+            ->map(fn ($value) => (string) $value)
+            ->all();
+
+        $locations = TraceQuery::query()
+            ->where('project_id', $project->id)
+            ->where('sql', $sql)
+            ->whereBetween('occurred_at', [$range->from, $range->to])
+            ->whereNotNull('file')
+            ->selectRaw('file, line, COUNT(*) AS total, SUM(duration_ms) AS total_ms, AVG(duration_ms) AS avg_ms')
+            ->groupBy('file', 'line')
+            ->orderByDesc('total')
+            ->orderBy('file')
+            ->orderBy('line')
+            ->limit(20)
+            ->get()
+            ->map(fn (TraceQuery $row) => [
+                'file' => (string) $row->file,
+                'line' => $row->line,
+                'total' => (int) $row->total,
+                'total_ms' => (float) $row->total_ms,
+                'avg_ms' => $row->avg_ms !== null ? (float) $row->avg_ms : null,
+            ])
+            ->all();
+
         $calls = TraceQuery::query()
             ->where('project_id', $project->id)
             ->where('sql', $sql)
             ->whereBetween('occurred_at', [$range->from, $range->to])
             ->orderByDesc('occurred_at')
             ->limit(200)
-            ->get(['id', 'duration_ms', 'row_count', 'is_slow', 'is_n_plus_one', 'occurred_at'])
+            ->get(['id', 'duration_ms', 'row_count', 'file', 'line', 'connection_type', 'is_slow', 'is_n_plus_one', 'occurred_at'])
             ->map(fn (TraceQuery $row) => [
                 'id' => $row->id,
                 'duration_ms' => (float) $row->duration_ms,
                 'row_count' => $row->row_count,
+                'file' => $row->file,
+                'line' => $row->line,
+                'connection_type' => $row->connection_type,
                 'is_slow' => (bool) $row->is_slow,
                 'is_n_plus_one' => (bool) $row->is_n_plus_one,
                 'occurred_at' => $row->occurred_at?->toIso8601String(),
@@ -171,6 +212,8 @@ class QueryStats
             'sql' => $sql,
             'hash' => $hash,
             'connection' => $connection !== null ? (string) $connection : null,
+            'connection_types' => $connectionTypes,
+            'locations' => $locations,
             'totals' => $summary['totals'],
             'buckets' => $summary['buckets'],
             'calls' => $calls,
@@ -256,6 +299,44 @@ class QueryStats
             });
 
         return $buckets;
+    }
+
+    private function formatLocation(string $file, ?int $line): string
+    {
+        return $line === null ? $file : $file.':'.$line;
+    }
+
+    /**
+     * The code locations each statement ran from, most called first. Statements from sensors that do not report a
+     * location are left out.
+     *
+     * @return array<string, list<array{file:string,line:int|null,total:int}>>
+     */
+    private function locationsBySql(Project $project, TimeRange $range, ?string $search): array
+    {
+        $query = $this->baseQuery($project, $range)->whereNotNull('file');
+
+        if ($search !== null && $search !== '') {
+            $query->where('sql', 'like', '%'.$search.'%');
+        }
+
+        $locations = [];
+        $query->select('sql', 'file', 'line')
+            ->selectRaw('COUNT(*) AS total')
+            ->groupBy('sql', 'file', 'line')
+            ->orderByDesc('total')
+            ->orderBy('file')
+            ->orderBy('line')
+            ->get()
+            ->each(function (TraceQuery $row) use (&$locations) {
+                $locations[$row->sql][] = [
+                    'file' => (string) $row->file,
+                    'line' => $row->line,
+                    'total' => (int) $row->total,
+                ];
+            });
+
+        return $locations;
     }
 
     /**

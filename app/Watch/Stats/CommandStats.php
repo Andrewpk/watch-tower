@@ -127,7 +127,7 @@ class CommandStats
      *   totals: array{total:int,successful:int,failed:int},
      *   duration: array{min_ms:int|null,max_ms:int|null,avg_ms:float|null,p95_ms:float|null,threshold_ms:int|null},
      *   buckets: list<array{bucket:string,successful:int,failed:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   calls: list<array{id:string,command:string,exit_code:int|null,status:string,duration_ms:int|null,occurred_at:string|null}>
+     *   calls: list<array{id:string,command:string,exit_code:int|null,status:string,duration_ms:int|null,lazy_loads:int|null,hydrated_models:int|null,occurred_at:string|null}>
      * }|null
      */
     public function commandDetail(Project $project, TimeRange $range, string $command): ?array
@@ -143,13 +143,15 @@ class CommandStats
         $calls = (clone $base)
             ->orderByDesc('occurred_at')
             ->limit(200)
-            ->get(['id', 'command', 'exit_code', 'status', 'duration_ms', 'occurred_at'])
+            ->get(['id', 'command', 'exit_code', 'status', 'duration_ms', 'lazy_loads', 'hydrated_models', 'occurred_at'])
             ->map(fn (CommandRun $run) => [
                 'id' => $run->id,
                 'command' => $run->command,
                 'exit_code' => $run->exit_code,
                 'status' => $run->status,
                 'duration_ms' => $run->duration_ms,
+                'lazy_loads' => $run->lazy_loads,
+                'hydrated_models' => $run->hydrated_models,
                 'occurred_at' => $run->occurred_at?->toIso8601String(),
             ])
             ->all();

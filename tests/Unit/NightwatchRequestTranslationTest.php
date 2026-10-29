@@ -38,6 +38,8 @@ it('translates a request record with the deploy id as its release and no environ
             'user_id' => '42',
             'duration_ms' => 125,
             'db_queries_count' => 3,
+            'lazy_loads' => null,
+            'hydrated_models' => null,
             'memory_used_kb' => 4096,
             'memory_peak_kb' => 4096,
             'release' => 'v1.4.2',

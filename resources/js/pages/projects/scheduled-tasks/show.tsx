@@ -13,6 +13,7 @@ import {
     YAxis,
 } from 'recharts';
 
+import { ModelCounts } from '@/components/model-counts';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -44,6 +45,8 @@ type Run = {
     status: string;
     duration_ms: number | null;
     exit_code: number | null;
+    lazy_loads: number | null;
+    hydrated_models: number | null;
     occurred_at: string | null;
 };
 
@@ -229,6 +232,9 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                     <TableHead className="text-right">
                                         DURATION
                                     </TableHead>
+                                    <TableHead className="w-32 text-right">
+                                        LAZY / MODELS
+                                    </TableHead>
                                     <TableHead className="w-10" />
                                 </TableRow>
                             </TableHeader>
@@ -236,7 +242,7 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                 {filteredRuns.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={4}
+                                            colSpan={5}
                                             className="py-10 text-center text-sm text-muted-foreground"
                                         >
                                             No runs match the current filters
@@ -255,6 +261,14 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right font-mono text-xs">
                                                 {formatMs(run.duration_ms)}
+                                            </TableCell>
+                                            <TableCell className="py-2.5 text-right font-mono text-xs">
+                                                <ModelCounts
+                                                    lazyLoads={run.lazy_loads}
+                                                    hydratedModels={
+                                                        run.hydrated_models
+                                                    }
+                                                />
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right">
                                                 <button

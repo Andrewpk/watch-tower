@@ -66,6 +66,8 @@ class NightwatchTranslator
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'db_queries_count' => $this->unsignedCount($r['queries'] ?? null),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'memory_used_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'release' => $this->limit($r['deploy'] ?? null, 255),
@@ -89,6 +91,9 @@ class NightwatchTranslator
      */
     private function translateQuery(array $r): array
     {
+        $file = $this->limit($r['file'] ?? null, 255);
+        $line = $file === null ? null : $this->boundedInt($r['line'] ?? null, 4_294_967_295);
+
         return [
             'type' => 'query',
             'id' => $this->scalarString($r['_group'] ?? null),
@@ -96,6 +101,9 @@ class NightwatchTranslator
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'sql' => mb_strcut($this->scalarString($r['sql'] ?? null), 0, 65_535, 'UTF-8'),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
+                'file' => $file,
+                'line' => $line === 0 ? null : $line,
+                'connection_type' => $this->limit($r['connection_type'] ?? null, 10),
                 'duration_ms' => $this->microsToFractionalMillis($r['duration'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -245,6 +253,8 @@ class NightwatchTranslator
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'status' => $status,
                 'attempts' => $this->unsignedCount($r['attempt'] ?? null, 1),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'started_at' => $this->timestampToIso($r['timestamp'] ?? null),
                 'completed_at' => $status === 'completed' ? $finishedAt : null,
                 'failed_at' => $status === 'failed' ? $finishedAt : null,
@@ -289,6 +299,8 @@ class NightwatchTranslator
                 'command' => $name,
                 'arguments' => $arguments,
                 'options' => $options,
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
                 'exit_code' => $exitCode,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
@@ -317,6 +329,8 @@ class NightwatchTranslator
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'task' => $this->limit($r['name'] ?? null, 255),
                 'task_hash' => $this->scheduledTaskHash($r),
+                'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
+                'hydrated_models' => $this->unsignedCountOrNull($r['hydrated_models'] ?? null),
                 'schedule' => $this->limit($r['cron'] ?? null, 255),
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
@@ -435,6 +449,15 @@ class NightwatchTranslator
         }
 
         return (int) max(0.0, min(floor((float) $value), 4_294_967_295.0));
+    }
+
+    /**
+     * Like unsignedCount(), but a missing or non-numeric value is null rather than 0: a record from an older sensor
+     * that does not report the count must not be stored as having none.
+     */
+    private function unsignedCountOrNull(mixed $value): ?int
+    {
+        return is_numeric($value) ? $this->unsignedCount($value) : null;
     }
 
     private function scalarString(mixed $value): string

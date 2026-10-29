@@ -13,6 +13,7 @@ import {
     YAxis,
 } from 'recharts';
 
+import { ModelCounts } from '@/components/model-counts';
 import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -53,6 +54,8 @@ type Attempt = {
     attempt: number;
     status: string;
     duration_ms: number | null;
+    lazy_loads: number | null;
+    hydrated_models: number | null;
     occurred_at: string | null;
 };
 
@@ -274,6 +277,9 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                     <TableHead className="text-right">
                                         DURATION
                                     </TableHead>
+                                    <TableHead className="w-32 text-right">
+                                        LAZY / MODELS
+                                    </TableHead>
                                     <TableHead className="w-10" />
                                 </TableRow>
                             </TableHeader>
@@ -281,7 +287,7 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                 {filteredAttempts.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={7}
+                                            colSpan={8}
                                             className="py-10 text-center text-sm text-muted-foreground"
                                         >
                                             No attempts match the current
@@ -310,6 +316,16 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right font-mono text-xs">
                                                 {formatMs(attempt.duration_ms)}
+                                            </TableCell>
+                                            <TableCell className="py-2.5 text-right font-mono text-xs">
+                                                <ModelCounts
+                                                    lazyLoads={
+                                                        attempt.lazy_loads
+                                                    }
+                                                    hydratedModels={
+                                                        attempt.hydrated_models
+                                                    }
+                                                />
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right">
                                                 <button

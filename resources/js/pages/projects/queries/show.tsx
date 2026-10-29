@@ -17,6 +17,14 @@ import { PageHeader } from '@/components/page-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
 import { AppLayout } from '@/layouts/app-layout';
 import { cn } from '@/lib/utils';
 import queriesRoutes from '@/routes/projects/queries';
@@ -33,6 +41,14 @@ type Detail = {
     sql: string;
     hash: string;
     connection: string | null;
+    connection_types: string[];
+    locations: {
+        file: string;
+        line: number | null;
+        total: number;
+        total_ms: number;
+        avg_ms: number | null;
+    }[];
     totals: {
         total: number;
         total_ms: number;
@@ -46,6 +62,9 @@ type Detail = {
         id: string;
         duration_ms: number;
         row_count: number | null;
+        file: string | null;
+        line: number | null;
+        connection_type: string | null;
         is_slow: boolean;
         is_n_plus_one: boolean;
         occurred_at: string | null;
@@ -98,6 +117,8 @@ export default function QueryShow({ detail, selectedRange }: Props) {
                     <InfoCard detail={detail} />
                     <SqlCard sql={detail.sql} connection={detail.connection} />
                 </div>
+
+                <LocationsCard locations={detail.locations} />
             </div>
         </AppLayout>
     );
@@ -339,6 +360,13 @@ function InfoCard({ detail }: { detail: Detail }) {
                             mono
                         />
                     ) : null}
+                    {detail.connection_types.length > 0 ? (
+                        <InfoRow
+                            label="Connection type"
+                            value={detail.connection_types.join(', ')}
+                            mono
+                        />
+                    ) : null}
                 </dl>
 
                 {detail.calls.length > 0 ? (
@@ -381,6 +409,62 @@ function InfoCard({ detail }: { detail: Detail }) {
                         </ul>
                     </div>
                 ) : null}
+            </CardContent>
+        </Card>
+    );
+}
+
+function LocationsCard({ locations }: { locations: Detail['locations'] }) {
+    return (
+        <Card>
+            <CardHeader className="pb-3">
+                <CardTitle>Locations</CardTitle>
+            </CardHeader>
+            <Separator />
+            <CardContent className="p-0">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Location</TableHead>
+                            <TableHead className="text-right">Calls</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead className="text-right">Avg</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {locations.length === 0 ? (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={4}
+                                    className="py-6 text-center text-sm text-muted-foreground"
+                                >
+                                    No code location reported for this query
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            locations.map((location) => (
+                                <TableRow
+                                    key={`${location.file}:${location.line}`}
+                                >
+                                    <TableCell className="py-2 font-mono text-xs">
+                                        {location.line === null
+                                            ? location.file
+                                            : `${location.file}:${location.line}`}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right tabular-nums">
+                                        {formatNumber(location.total)}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right text-muted-foreground tabular-nums">
+                                        {formatMs(location.total_ms)}
+                                    </TableCell>
+                                    <TableCell className="py-2 text-right text-muted-foreground tabular-nums">
+                                        {formatMs(location.avg_ms)}
+                                    </TableCell>
+                                </TableRow>
+                            ))
+                        )}
+                    </TableBody>
+                </Table>
             </CardContent>
         </Card>
     );
