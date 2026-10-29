@@ -137,6 +137,14 @@ it('stores mail, notification and outgoing request records against the request t
         ->and($outgoing->response_size_bytes)->toBe(2048);
 });
 
+it('stores the record timestamps as occurred_at', function () {
+    postNightwatchRecords(nightwatchMailBatch($this->startedAt, $this->traceId), $this->token)->assertOk();
+
+    expect(MailSend::sole()->occurred_at->getTimestamp())->toBe((int) floor($this->startedAt + 0.1))
+        ->and(NotificationSend::sole()->occurred_at->getTimestamp())->toBe((int) floor($this->startedAt + 0.2))
+        ->and(OutgoingRequest::sole()->occurred_at->getTimestamp())->toBe((int) floor($this->startedAt + 0.3));
+});
+
 it('creates a stub trace for children that arrive without their request', function () {
     postNightwatchRecords(nightwatchMailBatch($this->startedAt, $this->traceId, withRequest: false), $this->token)->assertOk();
 
@@ -194,7 +202,13 @@ it('lists ingested notifications and outgoing requests on their pages and detail
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->where('summary.totals.total', 1));
 
-    $this->get(route('projects.notifications.show', [$this->project, $notificationHash]))->assertOk();
+    $this->get(route('projects.notifications.show', [$this->project, $notificationHash]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('detail.notification_class', 'App\\Notifications\\InvoicePaid')
+            ->has('detail.sends', 1)
+            ->where('detail.sends.0.channel', 'mail')
+            ->where('detail.sends.0.duration_ms', 95));
 
     $this->get(route('projects.http-client.index', $this->project))
         ->assertOk()
@@ -202,7 +216,14 @@ it('lists ingested notifications and outgoing requests on their pages and detail
             ->where('summary.totals.total', 1)
             ->where('domains.data.0.hash', $hostHash));
 
-    $this->get(route('projects.http-client.show', [$this->project, $hostHash]))->assertOk();
+    $this->get(route('projects.http-client.show', [$this->project, $hostHash]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('detail.host', 'api.example.com')
+            ->has('detail.requests', 1)
+            ->where('detail.requests.0.method', 'POST')
+            ->where('detail.requests.0.status_code', 201)
+            ->where('detail.requests.0.url', 'https://api.example.com/v1/orders'));
 });
 
 it('survives oversized strings in mail, notification and outgoing request records', function () {

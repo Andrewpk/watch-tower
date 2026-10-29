@@ -3,6 +3,7 @@
 namespace App\Watch;
 
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Str;
 
 /**
  * Translates raw Nightwatch wire records (as produced by the SDK sensors and
@@ -220,7 +221,7 @@ class NightwatchTranslator
             'id' => (string) ($r['_group'] ?? ''),
             'data' => [
                 'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'class' => $this->limit($r['class'] ?? null, 255) ?? 'UnknownMailable',
+                'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownMailable',
                 'mailer' => $this->limit($r['mailer'] ?? null, 50),
                 'subject' => $this->limit($r['subject'] ?? null, 255),
                 'recipients_count' => (int) ($r['to'] ?? 0) + (int) ($r['cc'] ?? 0) + (int) ($r['bcc'] ?? 0),
@@ -228,7 +229,7 @@ class NightwatchTranslator
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 ...$this->sourceFields($r),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -245,12 +246,12 @@ class NightwatchTranslator
             'id' => (string) ($r['_group'] ?? ''),
             'data' => [
                 'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'class' => $this->limit($r['class'] ?? null, 255) ?? 'UnknownNotification',
-                'channel' => $this->limit($r['channel'] ?? null, 50) ?? 'unknown',
+                'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownNotification',
+                'channel' => $this->limit($this->channelName($r['channel'] ?? null), 50) ?? 'unknown',
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
                 'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
                 ...$this->sourceFields($r),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -277,7 +278,7 @@ class NightwatchTranslator
                 'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4294967295),
                 'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4294967295),
                 ...$this->sourceFields($r),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -297,6 +298,31 @@ class NightwatchTranslator
             'source_id' => $this->limit($r['execution_id'] ?? null, 255),
             'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
         ];
+    }
+
+    /**
+     * Cut an anonymous class name at its NUL byte, which is followed by the server file path.
+     */
+    private function withoutAnonymousSuffix(mixed $value): mixed
+    {
+        if (is_string($value) && str_contains($value, "@anonymous\0")) {
+            return Str::before($value, "\0");
+        }
+
+        return $value;
+    }
+
+    /**
+     * A notification channel is whatever `via()` returned: a short name like `mail`, or a fully qualified class
+     * name, which is reduced to its base name so the 50 character cut does not chop off the identifying end.
+     */
+    private function channelName(mixed $value): mixed
+    {
+        if (is_string($value) && str_contains($value, '\\')) {
+            return class_basename($value);
+        }
+
+        return $value;
     }
 
     /**

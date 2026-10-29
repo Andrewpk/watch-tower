@@ -190,3 +190,49 @@ it('drops outgoing request numbers that do not fit their columns', function () {
         ->and($event['data']['request_size_bytes'])->toBeNull()
         ->and($event['data']['response_size_bytes'])->toBeNull();
 });
+
+it('cuts the environment of mail, notification and outgoing request records to 50 characters', function () {
+    $translator = new NightwatchTranslator;
+    $deploy = str_repeat('d', 60);
+
+    foreach (['mail', 'notification', 'outgoing-request'] as $type) {
+        $event = $translator->translate([
+            't' => $type,
+            'deploy' => $deploy,
+            'class' => 'App\\Thing',
+            'channel' => 'mail',
+            'host' => 'api.example.com',
+            'url' => 'https://api.example.com/',
+        ]);
+
+        expect($event['data']['environment'])->toBe(str_repeat('d', 50));
+    }
+});
+
+it('stores the base name of a notification channel given as a class name', function () {
+    $event = (new NightwatchTranslator)->translate([
+        't' => 'notification',
+        'class' => 'App\\Notifications\\InvoicePaid',
+        'channel' => 'NotificationChannels\\PusherPushNotifications\\PusherChannel',
+    ]);
+
+    expect($event['data']['channel'])->toBe('PusherChannel');
+});
+
+it('drops the file path after the NUL byte of an anonymous mailable', function () {
+    $event = (new NightwatchTranslator)->translate(nightwatchMailRecord([
+        'class' => "Illuminate\\Mail\\Mailable@anonymous\0/var/www/app/Http/Controllers/OrderController.php:12$0",
+    ]));
+
+    expect($event['data']['class'])->toBe('Illuminate\\Mail\\Mailable@anonymous');
+});
+
+it('drops the file path after the NUL byte of an anonymous notification', function () {
+    $event = (new NightwatchTranslator)->translate([
+        't' => 'notification',
+        'channel' => 'mail',
+        'class' => "Illuminate\\Notifications\\Notification@anonymous\0/var/www/app/Jobs/Notify.php:30$0",
+    ]);
+
+    expect($event['data']['class'])->toBe('Illuminate\\Notifications\\Notification@anonymous');
+});
