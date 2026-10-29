@@ -224,15 +224,24 @@ class EventStore
     }
 
     /**
+     * Persist a dispatched (queued) job.
+     *
+     * With a `job_id` the run is keyed on (project, job id) and shared with its attempts: if an attempt record got
+     * here first, the queued record only fills the dispatch details the row lacks and never touches the outcome.
+     * Without a `job_id` (legacy `job` events) every record is its own row.
+     *
      * @param  array<string, mixed>  $data
      */
     private function storeJob(Project $project, array $data): void
     {
         $trace = $this->resolveTrace($project, $data);
 
-        QueueJobRun::create([
+        $jobId = $this->stringOrNull($data['job_id'] ?? null);
+
+        $values = [
             'project_id' => $project->id,
             'trace_id' => $trace?->id,
+            'job_id' => $jobId,
             'job_class' => (string) ($data['class'] ?? $data['job_class'] ?? 'UnknownJob'),
             'queue' => $this->stringOrNull($data['queue'] ?? null),
             'connection' => $this->stringOrNull($data['connection'] ?? null),
@@ -244,9 +253,25 @@ class EventStore
             'attempts' => (int) ($data['attempts'] ?? 0),
             'status' => (string) ($data['status'] ?? 'pending'),
             'payload' => $data['payload'] ?? null,
+            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
             'exception' => $data['exception'] ?? null,
             'environment' => $this->stringOrNull($data['environment'] ?? null),
-        ]);
+        ];
+
+        if ($jobId === null) {
+            QueueJobRun::create($values);
+
+            return;
+        }
+
+        $run = QueueJobRun::firstOrCreate(['project_id' => $project->id, 'job_id' => $jobId], $values);
+
+        if ($run->wasRecentlyCreated) {
+            return;
+        }
+
+        $this->fillJobRunBlanks($run, $values);
+        $run->save();
     }
 
     /**
@@ -270,9 +295,106 @@ class EventStore
     }
 
     /**
+     * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
+     *
+     * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeJobAttempt(Project $project, array $data): void {}
+    private function storeJobAttempt(Project $project, array $data): void
+    {
+        $trace = $this->resolveTrace($project, $data);
+        $jobId = $this->stringOrNull($data['job_id'] ?? null);
+        $startedAt = $this->parseTimestamp($data['started_at'] ?? null, allowNull: true);
+
+        $outcome = [
+            'status' => (string) ($data['status'] ?? 'unknown'),
+            'attempts' => (int) ($data['attempts'] ?? 1),
+            'started_at' => $startedAt,
+            'completed_at' => $this->parseTimestamp($data['completed_at'] ?? null, allowNull: true),
+            'failed_at' => $this->parseTimestamp($data['failed_at'] ?? null, allowNull: true),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'exception' => $data['exception'] ?? null,
+        ];
+
+        $details = [
+            'trace_id' => $trace?->id,
+            'job_class' => (string) ($data['class'] ?? $data['job_class'] ?? 'UnknownJob'),
+            'queue' => $this->stringOrNull($data['queue'] ?? null),
+            'connection' => $this->stringOrNull($data['connection'] ?? null),
+            'user_identifier' => $this->stringOrNull($data['user_id'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+        ];
+
+        $values = ['project_id' => $project->id, 'job_id' => $jobId, 'dispatched_at' => null, ...$details, ...$outcome];
+
+        if ($jobId === null) {
+            QueueJobRun::create($values);
+
+            return;
+        }
+
+        $run = QueueJobRun::firstOrCreate(['project_id' => $project->id, 'job_id' => $jobId], $values);
+
+        if ($run->wasRecentlyCreated) {
+            return;
+        }
+
+        DB::transaction(function () use ($run, $startedAt, $outcome, $details): void {
+            $locked = QueueJobRun::whereKey($run->id)->lockForUpdate()->firstOrFail();
+
+            if ($this->isNewestAttempt($locked, $startedAt, $outcome['attempts'])) {
+                $locked->fill($outcome);
+            }
+
+            $this->fillJobRunBlanks($locked, $details);
+            $locked->save();
+        });
+    }
+
+    /**
+     * Whether an attempt is at least as recent as the one the run currently reflects.
+     *
+     * Start times are stored with second precision, so attempts that began within the same second are ordered by
+     * attempt number instead.
+     */
+    private function isNewestAttempt(QueueJobRun $run, ?CarbonImmutable $startedAt, int $attempts): bool
+    {
+        if ($run->started_at === null) {
+            return true;
+        }
+
+        if ($startedAt === null) {
+            return false;
+        }
+
+        if ($startedAt->equalTo($run->started_at)) {
+            return $attempts >= $run->attempts;
+        }
+
+        return $startedAt->greaterThan($run->started_at);
+    }
+
+    /**
+     * Fill the run's empty columns from the candidates, and replace a placeholder job class; filled columns are kept.
+     *
+     * @param  array<string, mixed>  $candidates
+     */
+    private function fillJobRunBlanks(QueueJobRun $run, array $candidates): void
+    {
+        foreach (['dispatched_at', 'trace_id', 'queue', 'connection', 'user_identifier', 'environment'] as $column) {
+            if ($run->{$column} === null && ($candidates[$column] ?? null) !== null) {
+                $run->{$column} = $candidates[$column];
+            }
+        }
+
+        $jobClass = $candidates['job_class'] ?? null;
+
+        if ($run->job_class === 'UnknownJob' && $jobClass !== null && $jobClass !== 'UnknownJob') {
+            $run->job_class = $jobClass;
+        }
+    }
 
     /**
      * @param  array<string, mixed>  $data
