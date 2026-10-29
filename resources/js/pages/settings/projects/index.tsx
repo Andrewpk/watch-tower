@@ -380,35 +380,39 @@ function RotateKeyDialog({
                     </div>
                 </div>
 
-                <fieldset className="space-y-2 px-5 py-4">
-                    <legend className="mb-2 text-xs text-muted-foreground">
-                        Keep the old key working for:
-                    </legend>
-                    {GRACE_OPTIONS.map((option) => (
-                        <label
-                            key={option.hours}
-                            className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2 text-sm has-checked:border-primary has-checked:bg-muted/50"
-                        >
-                            <input
-                                type="radio"
-                                name="grace_hours"
-                                value={option.hours}
-                                checked={graceHours === option.hours}
-                                onChange={() => setGraceHours(option.hours)}
-                                className="mt-1"
-                            />
-                            <span>
-                                <span className="font-medium">
-                                    {option.label}
+                <div className="px-5 py-4">
+                    <fieldset className="space-y-2">
+                        <legend className="mb-2 text-xs text-muted-foreground">
+                            Keep the old key working for:
+                        </legend>
+                        {GRACE_OPTIONS.map((option) => (
+                            <label
+                                key={option.hours}
+                                className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2 text-sm has-checked:border-primary has-checked:bg-muted/50"
+                            >
+                                <input
+                                    type="radio"
+                                    name="grace_hours"
+                                    value={option.hours}
+                                    checked={graceHours === option.hours}
+                                    onChange={() => setGraceHours(option.hours)}
+                                    className="mt-1"
+                                />
+                                <span>
+                                    <span className="font-medium">
+                                        {option.label}
+                                    </span>
+                                    <span className="block text-xs text-muted-foreground">
+                                        {option.hint}
+                                    </span>
                                 </span>
-                                <span className="block text-xs text-muted-foreground">
-                                    {option.hint}
-                                </span>
-                            </span>
-                        </label>
-                    ))}
-                    {error && <p className="text-xs text-rose-600">{error}</p>}
-                </fieldset>
+                            </label>
+                        ))}
+                        {error && (
+                            <p className="text-xs text-rose-600">{error}</p>
+                        )}
+                    </fieldset>
+                </div>
 
                 <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
                     <Button
