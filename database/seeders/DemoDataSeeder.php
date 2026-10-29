@@ -387,6 +387,9 @@ class DemoDataSeeder extends Seeder
                 'is_handled' => $tpl['is_handled'],
                 'environment' => $environments[array_rand($environments)],
                 'release_version' => 'v1.4.2',
+                'language_version' => '8.4.0',
+                'framework_version' => '12.35.1',
+                'hostname' => 'web-1',
                 'context' => json_encode([
                     'request' => ['method' => 'GET', 'url' => '/api/example'],
                 ]),

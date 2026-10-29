@@ -77,6 +77,7 @@ type ExceptionDetail = {
     laravel_versions: string[];
     impacted_users: number;
     servers: string[];
+    first_release: string | null;
     environments: { environment: string; count: number }[];
     occurrences: { day: number; week: number; month: number };
     totals_in_range: { total: number; handled: number; unhandled: number };
@@ -211,7 +212,13 @@ function DetailsCard({ exception }: { exception: ExceptionDetail }) {
         },
         {
             label: 'First reported in',
-            value: <span className="text-muted-foreground">—</span>,
+            value: exception.first_release ? (
+                <span className="font-mono break-all">
+                    {exception.first_release}
+                </span>
+            ) : (
+                <span className="text-muted-foreground">—</span>
+            ),
         },
         {
             label: 'PHP versions',
@@ -225,7 +232,7 @@ function DetailsCard({ exception }: { exception: ExceptionDetail }) {
             label: 'Laravel versions',
             value: (
                 <span className="font-mono">
-                    {laravelVersions.length ? laravelVersions.join(' - ') : '—'}
+                    {laravelVersions.length ? laravelVersions.join(', ') : '—'}
                 </span>
             ),
         },

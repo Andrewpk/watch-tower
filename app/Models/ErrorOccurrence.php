@@ -25,6 +25,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'is_handled',
     'environment',
     'release_version',
+    'language_version',
+    'framework_version',
+    'hostname',
     'context',
     'occurred_at',
 ])]

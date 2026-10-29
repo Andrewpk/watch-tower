@@ -111,23 +111,34 @@ class NightwatchTranslator
     }
 
     /**
+     * Exception record (v3). `handled` is the real flag: true when the app reported the exception itself, false for
+     * an uncaught one. `php_version` and `laravel_version` become the language and framework version, `server` the
+     * hostname and `deploy` (the deployment id, `nightwatch.deployment`) the release; the wire carries no
+     * environment name. A fatal error sends the same shape with an empty `trace`.
+     *
      * @param  array<string, mixed>  $r
      * @return array{type: string, id: string, data: array<string, mixed>}
      */
     private function translateException(array $r): array
     {
+        $trace = $this->decodeMaybeJson($r['trace'] ?? null);
+
         return [
             'type' => 'exception',
-            'id' => (string) ($r['_group'] ?? ''),
+            'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
-                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
-                'class' => (string) ($r['class'] ?? 'Exception'),
-                'message' => (string) ($r['message'] ?? ''),
-                'file' => (string) ($r['file'] ?? ''),
+                'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'Exception',
+                'message' => $this->scalarString($r['message'] ?? null),
+                'file' => $this->limit($r['file'] ?? null, 255) ?? '',
                 'line' => $this->intOrNull($r['line'] ?? null),
-                'trace' => $this->decodeMaybeJson($r['trace'] ?? null),
-                'user_id' => $this->stringOrNull($r['user'] ?? null),
-                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'trace' => is_array($trace) ? $trace : [],
+                'is_handled' => ($r['handled'] ?? false) === true,
+                'language_version' => $this->limit($r['php_version'] ?? null, 50),
+                'framework_version' => $this->limit($r['laravel_version'] ?? null, 50),
+                'hostname' => $this->limit($r['server'] ?? null, 255),
+                'user_id' => $this->limit($r['user'] ?? null, 255),
+                'release' => $this->limit($r['deploy'] ?? null, 255),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
