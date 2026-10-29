@@ -28,6 +28,8 @@ it('translates a query record', function () {
         'id' => 'a1b2c3d4e5f60718293a4b5c6d7e8f90',
         'data' => [
             'request_id' => '11111111-2222-3333-4444-555555555555',
+            'source_type' => null,
+            'source_label' => null,
             'sql' => 'select * from `users` where `id` = ?',
             'connection' => 'mysql',
             'file' => null,

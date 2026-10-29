@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable([
     'project_id',
     'command',
+    'memory_peak_kb',
     'arguments',
     'options',
     'lazy_loads',
@@ -31,6 +32,7 @@ class CommandRun extends Model
     protected function casts(): array
     {
         return [
+            'memory_peak_kb' => 'integer',
             'arguments' => 'array',
             'options' => 'array',
             'lazy_loads' => 'integer',

@@ -192,6 +192,8 @@ class EventStore
                 'is_n_plus_one' => (bool) ($data['is_n_plus_one'] ?? false),
                 'n_plus_one_group' => $this->stringOrNull($data['n_plus_one_group'] ?? null),
                 'is_slow' => (bool) ($data['is_slow'] ?? false),
+                'source_type' => $this->limitedString($data['source_type'] ?? null, 50),
+                'source_label' => $this->limitedString($data['source_label'] ?? null, 255),
                 'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
             ]);
         }, attempts: 3);
@@ -221,8 +223,10 @@ class EventStore
         $frameworkVersion = $this->limitedString($data['framework_version'] ?? null, 50);
         $hostname = $this->limitedString($data['hostname'] ?? null, 255);
         $release = $this->limitedString($data['release'] ?? null, 255);
+        $sourceType = $this->limitedString($data['source_type'] ?? null, 50);
+        $sourceLabel = $this->limitedString($data['source_label'] ?? null, 255);
 
-        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release) {
+        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release, $sourceType, $sourceLabel) {
             if ($trace && ! $trace->has_errors) {
                 $trace->forceFill(['has_errors' => true])->save();
             }
@@ -279,6 +283,8 @@ class EventStore
                 'framework_version' => $frameworkVersion,
                 'hostname' => $hostname,
                 'context' => $data['context'] ?? null,
+                'source_type' => $sourceType,
+                'source_label' => $sourceLabel,
                 'occurred_at' => $occurredAt,
             ]);
 
@@ -375,6 +381,8 @@ class EventStore
             'operation' => (string) ($data['operation'] ?? 'unknown'),
             'succeeded' => (bool) ($data['succeeded'] ?? true),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'source_type' => $this->limitedString($data['source_type'] ?? null, 50),
+            'source_label' => $this->limitedString($data['source_label'] ?? null, 255),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
             'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
         ]);
@@ -384,9 +392,9 @@ class EventStore
      * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
      *
      * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
-     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. Per-attempt metrics (the lazy
-     * load and hydrated model counts) follow the same rule, and an attempt that does not carry them leaves the stored
-     * values alone: a newer attempt without counts keeps the previous attempt's values.
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. Per-attempt metrics (peak memory
+     * and the lazy load and hydrated model counts) follow the same rule, and an attempt that does not carry them leaves
+     * the stored values alone: a newer attempt without them keeps the previous attempt's values.
      *
      * @param  array<string, mixed>  $data
      */
@@ -399,6 +407,10 @@ class EventStore
         $outcome = [
             'status' => (string) ($data['status'] ?? 'unknown'),
             'attempts' => (int) ($data['attempts'] ?? 1),
+            ...array_filter(
+                ['memory_peak_kb' => $this->unsignedIntOrNull($data['memory_peak_kb'] ?? null)],
+                fn (mixed $value): bool => $value !== null,
+            ),
             'started_at' => $startedAt,
             'completed_at' => $this->parseTimestamp($data['completed_at'] ?? null, allowNull: true),
             'failed_at' => $this->parseTimestamp($data['failed_at'] ?? null, allowNull: true),
@@ -498,6 +510,7 @@ class EventStore
         CommandRun::create([
             'project_id' => $project->id,
             'command' => $this->stringOrNull($data['command'] ?? null) ?? 'unknown',
+            'memory_peak_kb' => $this->unsignedIntOrNull($data['memory_peak_kb'] ?? null),
             'arguments' => is_array($data['arguments'] ?? null) ? $data['arguments'] : null,
             'options' => is_array($data['options'] ?? null) ? $data['options'] : null,
             'lazy_loads' => $this->unsignedIntOrNull($data['lazy_loads'] ?? null),
@@ -537,6 +550,13 @@ class EventStore
             'status' => $this->stringOrNull($data['status'] ?? null) ?? 'processed',
             'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'memory_peak_kb' => $this->unsignedIntOrNull($data['memory_peak_kb'] ?? null),
+            'timezone' => $this->limitedString($data['timezone'] ?? null, 64),
+            'repeat_seconds' => $this->unsignedIntOrNull($data['repeat_seconds'] ?? null, 65_535),
+            'without_overlapping' => $this->boolOrNull($data['without_overlapping'] ?? null),
+            'on_one_server' => $this->boolOrNull($data['on_one_server'] ?? null),
+            'run_in_background' => $this->boolOrNull($data['run_in_background'] ?? null),
+            'even_in_maintenance_mode' => $this->boolOrNull($data['even_in_maintenance_mode'] ?? null),
             'threshold_ms' => $this->intOrNull($data['threshold_ms'] ?? null),
             'output' => $this->stringOrNull($data['output'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
@@ -621,9 +641,9 @@ class EventStore
     private function sourceAttributes(array $data): array
     {
         return [
-            'source_type' => $this->stringOrNull($data['source_type'] ?? null),
-            'source_id' => $this->stringOrNull($data['source_id'] ?? null),
-            'source_label' => $this->stringOrNull($data['source_label'] ?? null),
+            'source_type' => $this->limitedString($data['source_type'] ?? null, 50),
+            'source_id' => $this->limitedString($data['source_id'] ?? null, 255),
+            'source_label' => $this->limitedString($data['source_label'] ?? null, 255),
         ];
     }
 
@@ -956,5 +976,13 @@ class EventStore
         }
 
         return (string) $value;
+    }
+
+    /**
+     * A boolean for a nullable flag column, or null when the value is missing or not a scalar that reads as one.
+     */
+    private function boolOrNull(mixed $value): ?bool
+    {
+        return is_scalar($value) ? filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE) : null;
     }
 }

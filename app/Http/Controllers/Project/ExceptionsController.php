@@ -66,20 +66,24 @@ class ExceptionsController extends Controller
             ->first();
 
         $occurrenceList = $group->occurrences()
-            ->with('trace:id,method,uri')
+            ->with('trace:id,method,uri,is_stub')
             ->latest('occurred_at')
             ->limit(50)
             ->get()
-            ->map(fn (ErrorOccurrence $occurrence) => [
-                'id' => $occurrence->id,
-                'occurred_at' => $occurrence->occurred_at?->toIso8601String(),
-                'message' => $occurrence->message,
-                'user_identifier' => $occurrence->user_identifier,
-                'user_email' => $occurrence->user_email,
-                'user_name' => $occurrence->user_name,
-                'source_type' => $occurrence->trace?->method ?: 'COMMAND',
-                'source_label' => $this->sourceLabel($occurrence),
-            ])
+            ->map(function (ErrorOccurrence $occurrence): array {
+                $triggeredBy = $occurrence->triggeredBy();
+
+                return [
+                    'id' => $occurrence->id,
+                    'occurred_at' => $occurrence->occurred_at?->toIso8601String(),
+                    'message' => $occurrence->message,
+                    'user_identifier' => $occurrence->user_identifier,
+                    'user_email' => $occurrence->user_email,
+                    'user_name' => $occurrence->user_name,
+                    'source_type' => $triggeredBy['type'],
+                    'source_label' => $triggeredBy['label'],
+                ];
+            })
             ->all();
 
         return Inertia::render('projects/exceptions/show', [
@@ -128,21 +132,6 @@ class ExceptionsController extends Controller
                 'user_id' => $userId,
             ],
         ]);
-    }
-
-    private function sourceLabel(ErrorOccurrence $occurrence): ?string
-    {
-        if ($occurrence->trace?->uri) {
-            return $occurrence->trace->uri;
-        }
-
-        if ($occurrence->file) {
-            $parts = explode('/', $occurrence->file);
-
-            return end($parts) ?: $occurrence->file;
-        }
-
-        return null;
     }
 
     private function parseFilter(string $filter): ?bool

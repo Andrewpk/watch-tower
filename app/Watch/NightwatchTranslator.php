@@ -112,6 +112,8 @@ class NightwatchTranslator
             'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'sql' => mb_strcut($this->scalarString($r['sql'] ?? null), 0, 65_535, 'UTF-8'),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'file' => $file,
@@ -183,6 +185,8 @@ class NightwatchTranslator
                 'hostname' => $this->limit($r['server'] ?? null, 255),
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'release' => $this->limit($r['deploy'] ?? null, 255),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -248,6 +252,8 @@ class NightwatchTranslator
                 'operation' => mb_substr($this->normalizeCacheOperation($r['type'] ?? null), 0, 20),
                 'succeeded' => $this->cacheSucceeded($r),
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -289,6 +295,7 @@ class NightwatchTranslator
                 'completed_at' => $status === 'completed' ? $finishedAt : null,
                 'failed_at' => $status === 'failed' ? $finishedAt : null,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'exception' => $preview === null ? null : ['message' => $preview],
                 'user_id' => $this->limit($r['user'] ?? null, 255),
             ],
@@ -327,6 +334,7 @@ class NightwatchTranslator
             'data' => [
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'command' => $name,
+                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'arguments' => $arguments,
                 'options' => $options,
                 'lazy_loads' => $this->unsignedCountOrNull($r['lazy_loads'] ?? null),
@@ -368,6 +376,13 @@ class NightwatchTranslator
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
                 'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
+                'memory_peak_kb' => $status === 'skipped' ? null : $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
+                'timezone' => $this->limit($r['timezone'] ?? null, 64),
+                'repeat_seconds' => $this->boundedInt($r['repeat_seconds'] ?? null, 65_535),
+                'without_overlapping' => $this->boolOrNull($r['without_overlapping'] ?? null),
+                'on_one_server' => $this->boolOrNull($r['on_one_server'] ?? null),
+                'run_in_background' => $this->boolOrNull($r['run_in_background'] ?? null),
+                'even_in_maintenance_mode' => $this->boolOrNull($r['even_in_maintenance_mode'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -416,9 +431,26 @@ class NightwatchTranslator
             $this->scalarString($r['cron'] ?? null),
             $this->scalarString($r['timezone'] ?? null),
         ]);
-        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+        $repeatSeconds = $this->repeatSeconds($r);
 
         return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
+    }
+
+    /**
+     * The sub-minute repeat interval as an int, 0 when absent. A numeric value that is not finite or does not fit an
+     * int (such as `1e20`) counts as 0: the cast would throw on PHP 8.5 and fail the whole batch.
+     *
+     * @param  array<string, mixed>  $r
+     */
+    private function repeatSeconds(array $r): int
+    {
+        $value = $r['repeat_seconds'] ?? 0;
+
+        if (is_numeric($value) && (! is_finite((float) $value) || abs((float) $value) >= 9.2e18)) {
+            return 0;
+        }
+
+        return (int) $value;
     }
 
     /**
@@ -439,7 +471,7 @@ class NightwatchTranslator
 
         try {
             $from = CarbonImmutable::createFromTimestamp((float) $timestamp);
-            $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+            $repeatSeconds = $this->repeatSeconds($r);
 
             if ($repeatSeconds > 0) {
                 $repeat = $from->addSeconds($repeatSeconds);
@@ -627,6 +659,15 @@ class NightwatchTranslator
         $number = (float) $value;
 
         return is_finite($number) && $number >= 0 && $number <= $max ? (int) $number : null;
+    }
+
+    /**
+     * A strict boolean: anything that is not a real `true` or `false` (including `'yes'`, `1` and arrays) is null,
+     * meaning unknown.
+     */
+    private function boolOrNull(mixed $value): ?bool
+    {
+        return is_bool($value) ? $value : null;
     }
 
     /**

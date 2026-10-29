@@ -24,6 +24,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'is_n_plus_one',
     'n_plus_one_group',
     'is_slow',
+    'source_type',
+    'source_label',
     'occurred_at',
 ])]
 class TraceQuery extends Model

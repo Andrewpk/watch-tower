@@ -29,6 +29,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'framework_version',
     'hostname',
     'context',
+    'source_type',
+    'source_label',
     'occurred_at',
 ])]
 class ErrorOccurrence extends Model
@@ -69,5 +71,50 @@ class ErrorOccurrence extends Model
     public function errorGroup(): BelongsTo
     {
         return $this->belongsTo(ErrorGroup::class);
+    }
+
+    /**
+     * What ran when the exception was raised, as a type (`request`, `command`, `job`, `schedule` or an HTTP method)
+     * and a label (a URI, command name or job class).
+     *
+     * The stored execution source wins unless it is `request`: a queued job inherits the trace id of the request that
+     * dispatched it, so the trace exists but names the wrong cause. Without a source the trace decides, and records
+     * from before the source was stored fall back to `COMMAND` and the basename of the file. A source without a label
+     * (a scheduled task sends no preview) takes the same file fallback as its label.
+     *
+     * @return array{type: string, label: string|null}
+     */
+    public function triggeredBy(): array
+    {
+        $trace = $this->trace;
+
+        if ($this->source_type !== null && $this->source_type !== 'request') {
+            return ['type' => $this->source_type, 'label' => $this->source_label ?? $this->fallbackLabel()];
+        }
+
+        if ($trace !== null && ! $trace->is_stub && $trace->method !== '') {
+            return ['type' => $trace->method, 'label' => $trace->uri !== '' ? $trace->uri : $this->fallbackLabel()];
+        }
+
+        if ($this->source_type === 'request') {
+            return ['type' => 'request', 'label' => $this->source_label];
+        }
+
+        return ['type' => $trace?->method ?: 'COMMAND', 'label' => $this->fallbackLabel()];
+    }
+
+    private function fallbackLabel(): ?string
+    {
+        if ($this->trace?->uri) {
+            return $this->trace->uri;
+        }
+
+        if ($this->file) {
+            $parts = explode('/', $this->file);
+
+            return end($parts) ?: $this->file;
+        }
+
+        return null;
     }
 }

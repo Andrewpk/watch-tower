@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'job_class',
     'queue',
     'connection',
+    'memory_peak_kb',
     'dispatched_at',
     'started_at',
     'completed_at',
@@ -42,6 +43,7 @@ class QueueJobRun extends Model
         return [
             'dispatched_at' => 'datetime',
             'started_at' => 'datetime',
+            'memory_peak_kb' => 'integer',
             'completed_at' => 'datetime',
             'failed_at' => 'datetime',
             'duration_ms' => 'integer',

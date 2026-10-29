@@ -49,6 +49,7 @@ type Bucket = {
 
 type Attempt = {
     id: string;
+    memory_peak_kb: number | null;
     connection: string | null;
     queue: string | null;
     attempt: number;
@@ -274,6 +275,9 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                     <TableHead className="w-32">
                                         STATUS
                                     </TableHead>
+                                    <TableHead className="w-32 text-right">
+                                        PEAK MEMORY
+                                    </TableHead>
                                     <TableHead className="text-right">
                                         DURATION
                                     </TableHead>
@@ -287,7 +291,7 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                 {filteredAttempts.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={8}
+                                            colSpan={9}
                                             className="py-10 text-center text-sm text-muted-foreground"
                                         >
                                             No attempts match the current
@@ -313,6 +317,11 @@ export default function JobsShow({ detail, selectedRange }: Props) {
                                                 <JobStatusBadge
                                                     status={attempt.status}
                                                 />
+                                            </TableCell>
+                                            <TableCell className="py-2.5 text-right font-mono text-xs">
+                                                {formatKb(
+                                                    attempt.memory_peak_kb,
+                                                )}
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right font-mono text-xs">
                                                 {formatMs(attempt.duration_ms)}
@@ -656,6 +665,18 @@ function formatMs(value: number | null): string {
     }
 
     return `${Math.round(value)} ms`;
+}
+
+function formatKb(value: number | null): string {
+    if (value === null || Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value >= 1024) {
+        return `${(value / 1024).toFixed(1)} MB`;
+    }
+
+    return `${value} KB`;
 }
 
 function formatTime(iso: string): string {

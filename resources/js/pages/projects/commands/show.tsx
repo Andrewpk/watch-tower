@@ -48,6 +48,7 @@ type Bucket = {
 
 type Call = {
     id: string;
+    memory_peak_kb: number | null;
     command: string;
     exit_code: number | null;
     status: string;
@@ -239,6 +240,9 @@ export default function CommandsShow({ detail, selectedRange }: Props) {
                                         EXIT CODE
                                     </TableHead>
                                     <TableHead className="w-32 text-right">
+                                        PEAK MEMORY
+                                    </TableHead>
+                                    <TableHead className="w-32 text-right">
                                         DURATION
                                     </TableHead>
                                     <TableHead className="w-32 text-right">
@@ -251,7 +255,7 @@ export default function CommandsShow({ detail, selectedRange }: Props) {
                                 {filteredCalls.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={6}
+                                            colSpan={7}
                                             className="py-10 text-center text-sm text-muted-foreground"
                                         >
                                             No calls match the current filters
@@ -271,6 +275,9 @@ export default function CommandsShow({ detail, selectedRange }: Props) {
                                                     code={call.exit_code}
                                                     status={call.status}
                                                 />
+                                            </TableCell>
+                                            <TableCell className="py-2.5 text-right font-mono text-xs">
+                                                {formatKb(call.memory_peak_kb)}
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right font-mono text-xs">
                                                 {formatMs(call.duration_ms)}
@@ -593,6 +600,18 @@ function formatMs(value: number | null): string {
     }
 
     return `${Math.round(value)} ms`;
+}
+
+function formatKb(value: number | null): string {
+    if (value === null || Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value >= 1024) {
+        return `${(value / 1024).toFixed(1)} MB`;
+    }
+
+    return `${value} KB`;
 }
 
 function formatTime(iso: string): string {
