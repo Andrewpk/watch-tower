@@ -71,6 +71,19 @@ class NightwatchTranslator
                 'release' => $this->limit($r['deploy'] ?? null, 255),
                 'hostname' => $this->limit($r['server'] ?? null, 255),
                 'ip_address' => $this->limit($r['ip'] ?? null, 45),
+                'route_name' => $this->limit($r['route_name'] ?? null, 255),
+                'route_methods' => $this->routeMethods($r['route_methods'] ?? null),
+                'route_domain' => $this->limit($r['route_domain'] ?? null, 255),
+                'route_action' => $this->limit($r['route_action'] ?? null, 255),
+                'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4_294_967_295),
+                'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4_294_967_295),
+                'bootstrap_ms' => $this->microsToFractionalMillis($r['bootstrap'] ?? null),
+                'before_middleware_ms' => $this->microsToFractionalMillis($r['before_middleware'] ?? null),
+                'action_ms' => $this->microsToFractionalMillis($r['action'] ?? null),
+                'render_ms' => $this->microsToFractionalMillis($r['render'] ?? null),
+                'after_middleware_ms' => $this->microsToFractionalMillis($r['after_middleware'] ?? null),
+                'sending_ms' => $this->microsToFractionalMillis($r['sending'] ?? null),
+                'terminating_ms' => $this->microsToFractionalMillis($r['terminating'] ?? null),
                 'headers' => $this->decodeMaybeJson($r['headers'] ?? null),
                 'request_data' => $this->decodeMaybeJson($r['payload'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
@@ -114,6 +127,21 @@ class NightwatchTranslator
         }
 
         return min(round(max(0, (float) $value) / 1000, 3), 999_999_999.999);
+    }
+
+    /**
+     * The route's HTTP methods as one string such as `GET|HEAD` (the join Nightwatch uses for its own route group
+     * key). Non-string entries are dropped; an empty list is null.
+     */
+    private function routeMethods(mixed $value): ?string
+    {
+        if (! is_array($value)) {
+            return $this->limit($value, 100);
+        }
+
+        $methods = array_filter($value, fn (mixed $method): bool => is_string($method) && $method !== '');
+
+        return $methods === [] ? null : mb_substr(strtoupper(implode('|', $methods)), 0, 100);
     }
 
     /**
@@ -292,6 +320,9 @@ class NightwatchTranslator
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
                 'exit_code' => $exitCode,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'bootstrap_ms' => $this->microsToFractionalMillis($r['bootstrap'] ?? null),
+                'action_ms' => $this->microsToFractionalMillis($r['action'] ?? null),
+                'terminating_ms' => $this->microsToFractionalMillis($r['terminating'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];

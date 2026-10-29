@@ -71,7 +71,8 @@ class EventStore
      * value X and X plus the query sum: the request record overwrites what earlier queries added, and later queries
      * add on top. When the request
      * carries a user but no details were known while storing it, the end user is read again afterwards, see
-     * `completeUserDetails()`.
+     * `completeUserDetails()`. The route details, sizes and stage timings are only written when present, so a
+     * request record without them (a legacy client) does not erase what an earlier record stored.
      *
      * @param  array<string, mixed>  $data
      */
@@ -100,6 +101,21 @@ class EventStore
             'release_version' => $this->stringOrNull($data['release'] ?? null),
             'hostname' => $this->stringOrNull($data['hostname'] ?? null),
             'ip_address' => $this->stringOrNull($data['ip_address'] ?? null),
+            ...array_filter([
+                'route_name' => $this->limitedString($data['route_name'] ?? null, 255),
+                'route_methods' => $this->limitedString($data['route_methods'] ?? null, 100),
+                'route_domain' => $this->limitedString($data['route_domain'] ?? null, 255),
+                'route_action' => $this->limitedString($data['route_action'] ?? null, 255),
+                'request_size_bytes' => $this->unsignedIntOrNull($data['request_size_bytes'] ?? null),
+                'response_size_bytes' => $this->unsignedIntOrNull($data['response_size_bytes'] ?? null),
+                'bootstrap_ms' => $this->fractionalMsOrNull($data['bootstrap_ms'] ?? null),
+                'before_middleware_ms' => $this->fractionalMsOrNull($data['before_middleware_ms'] ?? null),
+                'action_ms' => $this->fractionalMsOrNull($data['action_ms'] ?? null),
+                'render_ms' => $this->fractionalMsOrNull($data['render_ms'] ?? null),
+                'after_middleware_ms' => $this->fractionalMsOrNull($data['after_middleware_ms'] ?? null),
+                'sending_ms' => $this->fractionalMsOrNull($data['sending_ms'] ?? null),
+                'terminating_ms' => $this->fractionalMsOrNull($data['terminating_ms'] ?? null),
+            ], fn (mixed $value): bool => $value !== null),
             'user_agent' => $this->stringOrNull($data['user_agent'] ?? null),
             'headers' => $data['headers'] ?? null,
             'request_data' => $data['request_data'] ?? null,
@@ -473,6 +489,9 @@ class EventStore
             'status' => $this->stringOrNull($data['status'] ?? null) ?? 'completed',
             'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
             'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'bootstrap_ms' => $this->fractionalMsOrNull($data['bootstrap_ms'] ?? null),
+            'action_ms' => $this->fractionalMsOrNull($data['action_ms'] ?? null),
+            'terminating_ms' => $this->fractionalMsOrNull($data['terminating_ms'] ?? null),
             'output' => $this->stringOrNull($data['output'] ?? null),
             'environment' => $this->stringOrNull($data['environment'] ?? null),
             'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
@@ -782,6 +801,19 @@ class EventStore
     }
 
     /**
+     * Milliseconds for a `decimal(12,3)` column: null unless the value is a finite number, negatives become zero and
+     * huge values are held at the column maximum.
+     */
+    private function fractionalMsOrNull(mixed $value): ?float
+    {
+        if (! is_numeric($value) || ! is_finite((float) $value)) {
+            return null;
+        }
+
+        return min(round(max(0.0, (float) $value), 3), 999_999_999.999);
+    }
+
+    /**
      * @param  array<string, mixed>  $data
      */
     private function storeLog(Project $project, array $data): void
@@ -867,6 +899,21 @@ class EventStore
     private function intOrNull(mixed $value): ?int
     {
         return $value === null || $value === '' ? null : (int) $value;
+    }
+
+    /**
+     * An integer for an unsigned column, or null when the value is not numeric or falls outside 0..$max, which
+     * would otherwise fail the insert under MySQL strict mode.
+     */
+    private function unsignedIntOrNull(mixed $value, int $max = 4_294_967_295): ?int
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $number = (float) $value;
+
+        return $number >= 0 && $number <= $max ? (int) $number : null;
     }
 
     private function stringOrNull(mixed $value): ?string

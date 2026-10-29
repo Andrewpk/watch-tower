@@ -10,6 +10,19 @@ use Illuminate\Database\Eloquent\Builder;
 class RequestStats
 {
     /**
+     * The per-stage timing columns of a request, in the order the request runs through them.
+     */
+    private const STAGE_COLUMNS = [
+        'bootstrap_ms',
+        'before_middleware_ms',
+        'action_ms',
+        'render_ms',
+        'after_middleware_ms',
+        'sending_ms',
+        'terminating_ms',
+    ];
+
+    /**
      * @return array{
      *   totals: array{total:int, success:int, client_error:int, server_error:int},
      *   duration: array{min_ms: int|null, max_ms: int|null, avg_ms: float|null, p95_ms: float|null},
@@ -53,7 +66,7 @@ class RequestStats
     }
 
     /**
-     * @return list<array{method:string,uri:string,success:int,client_error:int,server_error:int,total:int,avg_ms:float|null,p95_ms:float|null}>
+     * @return list<array{method:string,uri:string,route_name:string|null,route_action:string|null,success:int,client_error:int,server_error:int,total:int,avg_ms:float|null,p95_ms:float|null}>
      */
     public function routes(Project $project, TimeRange $range, ?string $userId = null, ?string $search = null): array
     {
@@ -62,12 +75,14 @@ class RequestStats
         if ($search !== null && $search !== '') {
             $like = '%'.$search.'%';
             $base->where(function (Builder $query) use ($like) {
-                $query->where('uri', 'like', $like)->orWhere('method', 'like', $like);
+                $query->where('uri', 'like', $like)->orWhere('method', 'like', $like)->orWhere('route_name', 'like', $like);
             });
         }
 
         $rows = (clone $base)
             ->selectRaw('method, uri')
+            ->selectRaw('MAX(route_name) AS route_name')
+            ->selectRaw('MAX(route_action) AS route_action')
             ->selectRaw('COUNT(*) AS total')
             ->selectRaw('SUM(CASE WHEN status_code < 400 THEN 1 ELSE 0 END) AS success')
             ->selectRaw('SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS client_error')
@@ -86,6 +101,8 @@ class RequestStats
                 return [
                     'method' => (string) $row->method,
                     'uri' => (string) $row->uri,
+                    'route_name' => $row->route_name !== null ? (string) $row->route_name : null,
+                    'route_action' => $row->route_action !== null ? (string) $row->route_action : null,
                     'success' => (int) $row->success,
                     'client_error' => (int) $row->client_error,
                     'server_error' => (int) $row->server_error,
@@ -102,10 +119,13 @@ class RequestStats
     /**
      * @return array{
      *   method:string, uri:string,
+     *   route: array{name: string|null, action: string|null, domain: string|null},
+     *   stages: array{bootstrap: float|null, before_middleware: float|null, action: float|null, render: float|null, after_middleware: float|null, sending: float|null, terminating: float|null},
+     *   sizes: array{avg_request_bytes: float|null, avg_response_bytes: float|null},
      *   totals: array{total:int, success:int, client_error:int, server_error:int},
      *   duration: array{avg_ms: float|null, p95_ms: float|null},
      *   buckets: list<array{bucket:string,success:int,client_error:int,server_error:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   recent: list<array{id:string,status_code:int|null,duration_ms:int|null,occurred_at:string|null,user_identifier:string|null}>
+     *   recent: list<array{id:string,status_code:int|null,duration_ms:int|null,stages: array{bootstrap: float|null, before_middleware: float|null, action: float|null, render: float|null, after_middleware: float|null, sending: float|null, terminating: float|null},occurred_at:string|null,user_identifier:string|null}>
      * }|null
      */
     public function routeDetail(Project $project, TimeRange $range, string $method, string $uri, ?string $userId = null): ?array
@@ -131,16 +151,32 @@ class RequestStats
             ->pluck('duration_ms')
             ->all();
 
+        $details = (clone $base)
+            ->selectRaw('MAX(route_name) AS route_name')
+            ->selectRaw('MAX(route_action) AS route_action')
+            ->selectRaw('MAX(route_domain) AS route_domain')
+            ->selectRaw('AVG(bootstrap_ms) AS bootstrap_ms')
+            ->selectRaw('AVG(before_middleware_ms) AS before_middleware_ms')
+            ->selectRaw('AVG(action_ms) AS action_ms')
+            ->selectRaw('AVG(render_ms) AS render_ms')
+            ->selectRaw('AVG(after_middleware_ms) AS after_middleware_ms')
+            ->selectRaw('AVG(sending_ms) AS sending_ms')
+            ->selectRaw('AVG(terminating_ms) AS terminating_ms')
+            ->selectRaw('AVG(request_size_bytes) AS avg_request_bytes')
+            ->selectRaw('AVG(response_size_bytes) AS avg_response_bytes')
+            ->first();
+
         $recent = (clone $base)
             ->orderByDesc('occurred_at')
             ->limit(20)
-            ->get(['id', 'method', 'uri', 'status_code', 'duration_ms', 'occurred_at', 'user_identifier'])
+            ->get(['id', 'method', 'uri', 'status_code', 'duration_ms', ...self::STAGE_COLUMNS, 'occurred_at', 'user_identifier'])
             ->map(fn (Trace $trace) => [
                 'id' => $trace->id,
                 'method' => $trace->method,
                 'uri' => $trace->uri,
                 'status_code' => $trace->status_code,
                 'duration_ms' => $trace->duration_ms,
+                'stages' => $this->stages($trace),
                 'occurred_at' => $trace->occurred_at?->toIso8601String(),
                 'user_identifier' => $trace->user_identifier,
             ])
@@ -149,6 +185,16 @@ class RequestStats
         return [
             'method' => $method,
             'uri' => $uri,
+            'route' => [
+                'name' => $details?->route_name !== null ? (string) $details->route_name : null,
+                'action' => $details?->route_action !== null ? (string) $details->route_action : null,
+                'domain' => $details?->route_domain !== null ? (string) $details->route_domain : null,
+            ],
+            'stages' => $this->stages($details),
+            'sizes' => [
+                'avg_request_bytes' => $details?->avg_request_bytes !== null ? (float) $details->avg_request_bytes : null,
+                'avg_response_bytes' => $details?->avg_response_bytes !== null ? (float) $details->avg_response_bytes : null,
+            ],
             'totals' => [
                 'total' => (int) ($stats?->total ?? 0),
                 'success' => (int) ($stats?->success ?? 0),
@@ -281,7 +327,7 @@ class RequestStats
         if ($search !== null && $search !== '') {
             $like = '%'.$search.'%';
             $query->where(function (Builder $sub) use ($like) {
-                $sub->where('uri', 'like', $like)->orWhere('method', 'like', $like);
+                $sub->where('uri', 'like', $like)->orWhere('method', 'like', $like)->orWhere('route_name', 'like', $like);
             });
         }
 
@@ -294,6 +340,27 @@ class RequestStats
             });
 
         return $buckets;
+    }
+
+    /**
+     * The stage timings of one trace, or of a row of per-stage averages. MySQL returns an AVG over a DECIMAL column
+     * as a string, hence the explicit cast.
+     *
+     * @return array{bootstrap: float|null, before_middleware: float|null, action: float|null, render: float|null, after_middleware: float|null, sending: float|null, terminating: float|null}
+     */
+    private function stages(?Trace $row): array
+    {
+        $stage = fn (string $column): ?float => $row?->{$column} !== null ? (float) $row->{$column} : null;
+
+        return [
+            'bootstrap' => $stage('bootstrap_ms'),
+            'before_middleware' => $stage('before_middleware_ms'),
+            'action' => $stage('action_ms'),
+            'render' => $stage('render_ms'),
+            'after_middleware' => $stage('after_middleware_ms'),
+            'sending' => $stage('sending_ms'),
+            'terminating' => $stage('terminating_ms'),
+        ];
     }
 
     /**

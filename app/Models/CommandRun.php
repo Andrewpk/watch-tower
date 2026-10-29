@@ -15,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'status',
     'exit_code',
     'duration_ms',
+    'bootstrap_ms',
+    'action_ms',
+    'terminating_ms',
     'output',
     'environment',
     'occurred_at',
@@ -30,6 +33,9 @@ class CommandRun extends Model
             'options' => 'array',
             'exit_code' => 'integer',
             'duration_ms' => 'integer',
+            'bootstrap_ms' => 'float',
+            'action_ms' => 'float',
+            'terminating_ms' => 'float',
             'occurred_at' => 'datetime',
         ];
     }

@@ -105,6 +105,17 @@ class DemoDataSeeder extends Seeder
             $hasUser = random_int(1, 100) <= 80;
             $endUser = $hasUser ? $endUsers[array_rand($endUsers)] : null;
 
+            $routeDetails = $this->routeDetails($method, $uri);
+            $stages = $this->splitIntoStages($duration, [
+                'bootstrap_ms' => 10,
+                'before_middleware_ms' => 8,
+                'action_ms' => 55,
+                'render_ms' => 10,
+                'after_middleware_ms' => 4,
+                'sending_ms' => 3,
+                'terminating_ms' => 10,
+            ]);
+
             $traces[] = [
                 'id' => (string) Str::uuid(),
                 'project_id' => $project->id,
@@ -124,6 +135,13 @@ class DemoDataSeeder extends Seeder
                 'release_version' => 'v1.4.2',
                 'hostname' => 'web-'.random_int(1, 3),
                 'ip_address' => '203.0.113.'.random_int(1, 254),
+                'route_name' => $routeDetails['name'],
+                'route_methods' => $routeDetails['methods'],
+                'route_domain' => null,
+                'route_action' => $routeDetails['action'],
+                'request_size_bytes' => random_int(200, 4_096),
+                'response_size_bytes' => random_int(300, 65_536),
+                ...$stages,
                 'user_agent' => 'Mozilla/5.0 (compatible; Demo/1.0)',
                 'headers' => json_encode(['accept' => 'application/json']),
                 'request_data' => json_encode([]),
@@ -150,6 +168,59 @@ class DemoDataSeeder extends Seeder
         $this->seedCache($project, $start);
         $this->seedOutgoingRequests($project, $start);
         $this->seedLogs($project, $start, $teamUsers);
+    }
+
+    /**
+     * The route name, action and methods the demo traces report for a method and URI.
+     *
+     * @return array{name: string|null, action: string, methods: string}
+     */
+    private function routeDetails(string $method, string $uri): array
+    {
+        $controller = match (true) {
+            str_starts_with($uri, '/api/users') => 'UserController',
+            str_starts_with($uri, '/api/orders') => 'OrderController',
+            str_starts_with($uri, '/api/payments') => 'PaymentController',
+            str_starts_with($uri, '/api/reports') => 'ReportController',
+            str_starts_with($uri, '/api/search') => 'SearchController',
+            str_starts_with($uri, '/api/products') => 'ProductController',
+            str_starts_with($uri, '/api/checkout') => 'CheckoutController',
+            str_starts_with($uri, '/api/notifications') => 'NotificationController',
+            $uri === '/dashboard' => 'DashboardController',
+            default => 'SettingsController',
+        };
+
+        $hasId = str_contains($uri, '{id}');
+        $action = match ($method) {
+            'GET' => $hasId || $uri === '/dashboard' || $uri === '/settings' ? 'show' : 'index',
+            'POST' => 'store',
+            'PUT' => 'update',
+            default => 'destroy',
+        };
+
+        $resource = str_contains($uri, '/api/') ? substr($uri, 5) : substr($uri, 1);
+        $resource = str_replace(['/{id}', '/'], ['', '.'], $resource);
+
+        return [
+            'name' => $resource.'.'.$action,
+            'action' => 'App\\Http\\Controllers\\'.$controller.'@'.$action,
+            'methods' => $method === 'GET' ? 'GET|HEAD' : $method,
+        ];
+    }
+
+    /**
+     * Split a duration into stage timings in fractional milliseconds, following the given weights with some jitter.
+     * The stages add up to the duration.
+     *
+     * @param  array<string, int>  $weights
+     * @return array<string, float>
+     */
+    private function splitIntoStages(int|float $duration, array $weights): array
+    {
+        $jittered = array_map(fn (int $weight): float => $weight * (random_int(70, 130) / 100), $weights);
+        $sum = array_sum($jittered);
+
+        return array_map(fn (float $weight): float => round($duration * $weight / $sum, 3), $jittered);
     }
 
     /**
@@ -667,6 +738,12 @@ class DemoDataSeeder extends Seeder
             $offsetSeconds = random_int(0, 86_400);
             $occurredAt = $start->addSeconds($offsetSeconds);
 
+            $stages = $this->splitIntoStages($duration, [
+                'bootstrap_ms' => 8,
+                'action_ms' => 88,
+                'terminating_ms' => 4,
+            ]);
+
             $rows[] = [
                 'id' => (string) Str::uuid(),
                 'project_id' => $project->id,
@@ -676,6 +753,7 @@ class DemoDataSeeder extends Seeder
                 'status' => $status,
                 'exit_code' => $exitCode,
                 'duration_ms' => $duration,
+                ...$stages,
                 'output' => $failed
                     ? "Error: process exited with code {$exitCode}\n  at ".$tpl['command']
                     : "Completed {$tpl['command']} in {$duration}ms",
