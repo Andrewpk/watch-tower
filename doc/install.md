@@ -176,11 +176,17 @@ php artisan queue:listen --tries=1 --timeout=0
 php artisan pail
 ```
 
+A queue worker must always run in production too. Ingested events are processed by the queue, so without a worker nothing is stored.
+
 ### 5.3 Scheduler (required for retention)
 
 Each project's `retention_days` is only enforced while the scheduler runs. Run `php artisan schedule:work`, or add a cron entry that calls `php artisan schedule:run` every minute. Without it nothing is pruned and telemetry grows forever.
 
 The scheduler runs `watch:prune` daily, plus `telescope:prune` and `queue:prune-failed`. Try `php artisan watch:prune --dry-run` to see what would be deleted.
+
+The [Docker image](docker.md) runs the scheduler and a queue worker by default. Outside Docker in production, run `php artisan schedule:run` from cron every minute and keep `php artisan queue:work` running under a process manager such as supervisord or systemd.
+
+Super admins see a warning at the top of every page when `watch:prune` has not finished for more than 25 hours, or when queued jobs sit unclaimed for more than 10 minutes. Both thresholds can be changed; see [Retention and maintenance warnings](docker.md#retention-and-maintenance-warnings).
 
 ---
 
