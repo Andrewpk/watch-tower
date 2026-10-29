@@ -3,6 +3,7 @@
 namespace App\Watch;
 
 use Carbon\CarbonImmutable;
+use Cron\CronExpression;
 
 /**
  * Translates raw Nightwatch wire records (as produced by the SDK sensors and
@@ -189,21 +190,140 @@ class NightwatchTranslator
     }
 
     /**
+     * Artisan command run, keyed on its trace id. A command is `completed` only for exit code 0; the raw argv is
+     * split into arguments and options on a best-effort basis, and the command output is not on the wire.
+     *
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array<string, mixed>}
      */
-    private function translateCommand(array $r): ?array
+    private function translateCommand(array $r): array
     {
-        return null;
+        $traceId = (string) ($r['trace_id'] ?? '');
+        $name = $this->limit($r['name'] ?? null, 255);
+        $exitCode = $this->intOrNull($r['exit_code'] ?? null);
+        ['arguments' => $arguments, 'options' => $options] = $this->splitCommandLine($r['command'] ?? null, $name);
+
+        return [
+            'type' => 'command',
+            'id' => $traceId,
+            'data' => [
+                'request_id' => $this->stringOrNull($traceId),
+                'command' => $name,
+                'arguments' => $arguments,
+                'options' => $options,
+                'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
+                'exit_code' => $exitCode,
+                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
+    }
+
+    /**
+     * Scheduled task run, keyed on its trace id (every run gets a new one). The task is identified by a 40-character
+     * sha1 over its name, cron expression, timezone and repeat interval, which is what the task detail route accepts.
+     * A skipped run never executed, so it has no duration. Exit code and output are not on the wire.
+     *
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}
+     */
+    private function translateScheduledTask(array $r): array
+    {
+        $traceId = (string) ($r['trace_id'] ?? '');
+        $status = $this->limit($r['status'] ?? null, 50) ?? 'processed';
+        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+
+        return [
+            'type' => 'scheduled-task',
+            'id' => $traceId,
+            'data' => [
+                'request_id' => $this->stringOrNull($traceId),
+                'task' => $this->limit($r['name'] ?? null, 255),
+                'task_hash' => $this->scheduledTaskHash($r),
+                'schedule' => $this->limit($r['cron'] ?? null, 255),
+                'next_run_at' => $this->nextRunAt($r),
+                'status' => $status,
+                'duration_ms' => $status === 'skipped' ? null : $this->microsToMillis($r['duration'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
+    }
+
+    /**
+     * Split a raw argv string (`app:sync-users --force 42`) into positional arguments and `-` prefixed options.
+     * The leading command name is dropped. Both lists are null when empty.
+     *
+     * @return array{arguments: list<string>|null, options: list<string>|null}
+     */
+    private function splitCommandLine(mixed $line, ?string $name): array
+    {
+        $tokens = is_string($line) ? preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY) : [];
+
+        if ($tokens !== [] && $tokens !== false && $tokens[0] === $name) {
+            array_shift($tokens);
+        }
+
+        $arguments = [];
+        $options = [];
+
+        foreach ($tokens ?: [] as $token) {
+            if (str_starts_with($token, '-')) {
+                $options[] = $token;
+            } else {
+                $arguments[] = $token;
+            }
+        }
+
+        return [
+            'arguments' => $arguments === [] ? null : $arguments,
+            'options' => $options === [] ? null : $options,
+        ];
     }
 
     /**
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
      */
-    private function translateScheduledTask(array $r): ?array
+    private function scheduledTaskHash(array $r): string
     {
-        return null;
+        $key = implode(',', [(string) ($r['name'] ?? ''), (string) ($r['cron'] ?? ''), (string) ($r['timezone'] ?? '')]);
+        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+
+        return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
+    }
+
+    /**
+     * The next time the task is due after this run, as a UTC ISO string; null when the cron expression or timezone
+     * cannot be evaluated. Sub-minute tasks (`repeat_seconds`) are due again one interval after this run.
+     *
+     * @param  array<string, mixed>  $r
+     */
+    private function nextRunAt(array $r): ?string
+    {
+        $timestamp = $r['timestamp'] ?? null;
+        $cron = $r['cron'] ?? null;
+
+        if (! is_numeric($timestamp) || ! is_string($cron) || $cron === '') {
+            return null;
+        }
+
+        try {
+            $from = CarbonImmutable::createFromTimestamp((float) $timestamp);
+            $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+
+            if ($repeatSeconds > 0) {
+                return $from->addSeconds($repeatSeconds)->utc()->toIso8601String();
+            }
+
+            $timezone = is_string($r['timezone'] ?? null) && $r['timezone'] !== '' ? $r['timezone'] : null;
+
+            return CarbonImmutable::instance((new CronExpression($cron))->getNextRunDate($from, 0, false, $timezone))
+                ->utc()
+                ->toIso8601String();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**
