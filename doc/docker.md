@@ -6,7 +6,7 @@ Every published GitHub release builds a production image (linux/amd64) and pushe
 docker pull ghcr.io/andrewpk/watch-tower:latest
 ```
 
-Releases must use semver tags such as `v1.2.3`. They publish the tags `1.2.3`, `1.2` and `latest`. A pre-release such as `v1.0.0-rc.1` only gets its exact version tag. Pin a version in production.
+Releases must use semver tags such as `v1.2.3`. They publish the tags `1.2.3`, `1.2` and `latest`. A pre-release such as `v1.0.0-rc.1` publishes `1.0.0-rc.1` and `latest`. `latest` always points at the most recently published release, which can be a pre-release, so pin a version in production.
 
 ## Environment
 
