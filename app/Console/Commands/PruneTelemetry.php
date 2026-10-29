@@ -59,6 +59,7 @@ class PruneTelemetry extends Command
             return self::FAILURE;
         }
 
+        $startedAt = now();
         $pruner = new TelemetryPruner($chunkSize);
         $total = 0;
 
@@ -86,7 +87,7 @@ class PruneTelemetry extends Command
         }
 
         if (! $dryRun && ! $slug) {
-            MaintenanceRun::recordFinished(MaintenanceRun::TASK_PRUNE, $total);
+            MaintenanceRun::recordFinished(MaintenanceRun::TASK_PRUNE, $startedAt, $total);
         }
 
         $this->components->info($dryRun

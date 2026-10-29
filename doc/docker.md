@@ -54,7 +54,7 @@ docker run -d --name watch-tower --restart unless-stopped -p 8080:8080 \
   ghcr.io/andrewpk/watch-tower:1.2.3
 ```
 
-`--restart unless-stopped` matters: if a program keeps failing, the container stops on purpose and the restart policy starts a fresh one. See [Stopping and restarts](#stopping-and-restarts). Plan for about 512 MB of memory for the three processes together.
+`--restart unless-stopped` matters: if the web server keeps failing to start, the container stops on purpose and the restart policy starts a fresh one. See [Stopping and restarts](#stopping-and-restarts). Plan for about 512 MB of memory for the three processes together.
 
 Check `curl http://localhost:8080/up`, then open the app. There is no sign-up page. Create the first user with the seeder, then log in as `super@admin.test` / `12345678` and change the password straight away. The seeded password is public, so do this before the container is reachable from the internet:
 
@@ -103,14 +103,15 @@ docker run -d --name watch-tower-scheduler --restart unless-stopped \
 
 > **Upgrading from an earlier image?** If you already run a worker and a scheduler in their own containers, set `RUN_QUEUE_WORKER=false` and `RUN_SCHEDULER=false` on the web container. Without that, the web container also starts a worker and a scheduler. A second scheduler is harmless (see below), but an extra worker adds database contention, most noticeably on SQLite.
 
-- **Several replicas of the web container.** Each runs its own scheduler. The daily tasks use `onOneServer()`, so they run once as long as the replicas share one database cache (the default `CACHE_STORE=database`). Do not give replicas separate caches.
+- **Several replicas of the web container.** Each runs its own scheduler, and its own queue worker unless you set `RUN_QUEUE_WORKER=false` on it (several workers on SQLite: see the next point). The daily tasks use `onOneServer()`, so they run once as long as the replicas share one database cache (the default `CACHE_STORE=database`). Do not give replicas separate caches.
 - **SQLite.** Run one worker per deployment. Several workers on one SQLite file can fail to claim a job under write contention.
 - **Several hosts or workers.** Use MySQL 8.
 
 ## Stopping and restarts
 
 - **Stopping.** On SIGTERM supervisord stops the three programs in parallel. The worker finishes its current job first, and the scheduler releases its locks.
-- **A program that keeps failing.** supervisord restarts a crashed program. If it fails to start repeatedly, supervisord gives up on it, and the image then stops the container with exit code 0. Use `--restart unless-stopped` or `always` (or your platform's equivalent), because Docker's default (`no`) and `on-failure` do not restart a container that exits with code 0.
+- **Before the first migration.** With `AUTORUN_ENABLED` off, the queue worker waits (checking every 10 seconds) until the database is fully migrated and reachable, then starts. Run `php artisan migrate --force` once, or set `AUTORUN_ENABLED=true`. The worker also waits out a database restart.
+- **A program that keeps failing.** supervisord restarts a crashed program with a growing delay. It tries 3 times to start the web server, and 100 times (over an hour) for the worker and scheduler. If the web server cannot start, supervisord gives up and the image stops the container with exit code 0. A worker or scheduler that gives up is logged, but the container keeps running, because a restart would not fix it; the maintenance warnings below show it. Use `--restart unless-stopped` or `always` (or your platform's equivalent), because Docker's default (`no`) and `on-failure` do not restart a container that exits with code 0.
 - **Long jobs.** The worker gets up to 85 seconds to finish a job after SIGTERM, but Docker kills the container after 10 seconds by default. Pass `--stop-timeout 90` (Compose: `stop_grace_period: 90s`) so a long job, such as deleting a large project, can finish. A job that is interrupted is retried.
 - **Status.** `docker exec watch-tower supervisorctl -c /etc/supervisor/watch-tower.conf status` lists the three programs.
 - **Logs.** All three write to `docker logs`, interleaved and without a prefix.
@@ -120,10 +121,10 @@ docker run -d --name watch-tower-scheduler --restart unless-stopped \
 
 Watch Tower records when `watch:prune` last finished. Super admins see a warning at the top of every page when:
 
-- retention has not finished within `WATCH_PRUNE_OVERDUE_HOURS` (default `25`), or has never run on an install older than that. The scheduler is probably not running.
+- retention has not finished within `WATCH_PRUNE_OVERDUE_HOURS` (default `25`), or no run has been recorded more than that long after the install or upgrade. The scheduler is probably not running. A project must exist for the warning to show.
 - a queued job has waited unclaimed for `WATCH_QUEUE_STALLED_MINUTES` (default `10`). The queue worker is probably not running. This check only applies to the `database` queue driver, which is the default.
 
-Settings > Projects shows when retention last ran and how many rows it deleted.
+Settings > Projects shows when retention last ran and how many rows it deleted, or that no run has been recorded yet.
 
 To see what the next prune would delete without deleting anything:
 

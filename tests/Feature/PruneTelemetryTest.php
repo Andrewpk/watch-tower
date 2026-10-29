@@ -189,7 +189,8 @@ it('records when a full run finished and how many rows it deleted', function () 
 
     $run = MaintenanceRun::query()->findOrFail(MaintenanceRun::TASK_PRUNE);
 
-    expect($run->finished_at->equalTo(now()))->toBeTrue()
+    expect($run->started_at->equalTo(now()))->toBeTrue()
+        ->and($run->finished_at->equalTo(now()))->toBeTrue()
         ->and($run->rows_deleted)->toBe(14);
 });
 
@@ -197,6 +198,14 @@ it('records a run when there are no projects', function () {
     $this->artisan('watch:prune')->assertSuccessful();
 
     expect(MaintenanceRun::query()->findOrFail(MaintenanceRun::TASK_PRUNE)->rows_deleted)->toBe(0);
+});
+
+it('replaces the baseline the migration seeded', function () {
+    expect(MaintenanceRun::query()->sole()->hasRecordedRun())->toBeFalse();
+
+    $this->artisan('watch:prune')->assertSuccessful();
+
+    expect(MaintenanceRun::query()->sole()->hasRecordedRun())->toBeTrue();
 });
 
 it('updates the same record on every run', function () {
@@ -222,5 +231,5 @@ it('does not record a dry run, a single-project run or a failed run', function (
     $this->artisan('watch:prune', ['--project' => 'nope'])->assertFailed();
     $this->artisan('watch:prune', ['--chunk' => 0])->assertFailed();
 
-    expect(MaintenanceRun::query()->count())->toBe(0);
+    expect(MaintenanceRun::query()->sole()->hasRecordedRun())->toBeFalse();
 });

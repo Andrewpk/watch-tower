@@ -77,6 +77,14 @@ it('starts supervisord in the foreground as the container command', function () 
         ->and($config['unix_http_server']['chmod'])->toBe('0700');
 });
 
+it('sets fixed socket credentials that supervisorctl shares, so supervisord does not log a CRIT', function () {
+    $config = supervisorConfig();
+
+    expect($config['unix_http_server'])->toHaveKeys(['username', 'password'])
+        ->and($config['supervisorctl']['username'])->toBe($config['unix_http_server']['username'])
+        ->and($config['supervisorctl']['password'])->toBe($config['unix_http_server']['password']);
+});
+
 it('installs supervisor without recommended packages', function () {
     expect(dockerfile())->toContain('apt-get install -y --no-install-recommends supervisor');
 });
@@ -93,6 +101,22 @@ it('runs the queue worker unless RUN_QUEUE_WORKER is false', function () {
         ->toContain('--tries=3')
         ->toContain('--max-time=')
         ->and($worker['autostart'])->toBe('%(ENV_RUN_QUEUE_WORKER)s');
+});
+
+it('makes the queue worker wait for migrations instead of crashing on an empty database', function () {
+    $command = supervisorConfig()['program:queue-worker']['command'];
+
+    expect($command)->toStartWith('sh -c ')
+        ->toContain('until php /var/www/html/artisan migrate:status --pending=1')
+        ->toContain('do sleep 10; done; exec php /var/www/html/artisan queue:work');
+});
+
+it('retries a failing worker, scheduler and listener many times before giving up', function () {
+    $config = supervisorConfig();
+
+    foreach (['program:queue-worker', 'program:scheduler', 'eventlistener:exit-on-fatal'] as $section) {
+        expect((int) $config[$section]['startretries'])->toBeGreaterThanOrEqual(100);
+    }
 });
 
 it('runs the scheduler unless RUN_SCHEDULER is false', function () {
@@ -133,7 +157,7 @@ it('gives a running job time to finish before the queue worker is killed', funct
     expect((int) supervisorConfig()['program:queue-worker']['stopwaitsecs'])->toBeGreaterThan($jobTimeout);
 });
 
-it('stops the container when a program gives up starting', function () {
+it('stops the container when the web server gives up starting', function () {
     expect(supervisorConfig()['eventlistener:exit-on-fatal']['events'])->toBe('PROCESS_STATE_FATAL')
         ->and(supervisorConfig()['eventlistener:exit-on-fatal']['command'])->toBe('/usr/local/bin/watch-tower-exit-on-fatal');
 });
@@ -147,14 +171,21 @@ it('ships an event listener that is valid sh', function () {
     expect(proc_close($process))->toBe(0, $errors);
 });
 
-it('answers the supervisord event protocol and signals its parent', function () {
+/**
+ * Run the listener script against one PROCESS_STATE_FATAL event.
+ *
+ * The wrapper shell is the listener's parent, like supervisord is in the
+ * container, and reports a TERM it receives.
+ *
+ * @return array{output: string, errors: string}
+ */
+function runExitOnFatalListener(string $payload): array
+{
     $script = tempnam(sys_get_temp_dir(), 'listener');
     file_put_contents($script, dockerfileHeredoc('/usr/local/bin/watch-tower-exit-on-fatal')."\n");
 
-    $payload = 'processname:web groupname:watch-tower from_state:BACKOFF';
     $header = 'ver:3.0 server:supervisor serial:1 pool:exit-on-fatal poolserial:1 eventname:PROCESS_STATE_FATAL len:'.strlen($payload);
 
-    // The wrapper shell is the listener's parent, like supervisord is in the container.
     $process = proc_open(
         ['sh', '-c', 'trap "echo TERMED >&2" TERM; sh "$0"; :', $script],
         [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
@@ -167,7 +198,25 @@ it('answers the supervisord event protocol and signals its parent', function () 
     proc_close($process);
     unlink($script);
 
-    expect($output)->toBe("READY\nRESULT 2\nOKREADY\n")
-        ->and($errors)->toContain("supervisord gave up on a program ({$payload}). Stopping the container.")
+    return ['output' => $output, 'errors' => $errors];
+}
+
+it('answers the supervisord event protocol and signals its parent when the web server gives up', function () {
+    $payload = 'processname:web groupname:watch-tower from_state:BACKOFF';
+
+    $result = runExitOnFatalListener($payload);
+
+    expect($result['output'])->toBe("READY\nRESULT 2\nOKREADY\n")
+        ->and($result['errors'])->toContain("supervisord gave up on the web server ({$payload}). Stopping the container.")
         ->toContain('TERMED');
 });
+
+it('logs but does not stop the container when the queue worker or scheduler gives up', function (string $program) {
+    $payload = "processname:{$program} groupname:watch-tower from_state:BACKOFF";
+
+    $result = runExitOnFatalListener($payload);
+
+    expect($result['output'])->toBe("READY\nRESULT 2\nOKREADY\n")
+        ->and($result['errors'])->toContain("supervisord gave up on a program ({$payload}). The container keeps running.")
+        ->not->toContain('TERMED');
+})->with(['queue-worker', 'scheduler']);

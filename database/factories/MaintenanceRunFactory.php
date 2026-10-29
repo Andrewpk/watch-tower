@@ -19,6 +19,7 @@ class MaintenanceRunFactory extends Factory
     {
         return [
             'task' => MaintenanceRun::TASK_PRUNE,
+            'started_at' => now(),
             'finished_at' => now(),
             'rows_deleted' => 0,
         ];

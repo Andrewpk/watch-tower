@@ -10,6 +10,9 @@ use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     $this->travelTo('2026-06-15 12:00:00');
+
+    // The migration seeds a baseline row; each test sets up its own record.
+    MaintenanceRun::query()->delete();
 });
 
 /**
@@ -36,7 +39,11 @@ function insertQueuedJob(int $availableSecondsAgo, ?int $reservedAt = null): voi
 }
 
 describe('retention prune', function () {
-    it('has no problem without projects and without a record', function () {
+    it('has no problem without projects, with or without a record', function () {
+        expect(maintenanceProblems())->toBe([]);
+
+        MaintenanceRun::factory()->create(['started_at' => now()->subDays(10), 'finished_at' => now()->subDays(10)]);
+
         expect(maintenanceProblems())->toBe([]);
     });
 
@@ -55,24 +62,47 @@ describe('retention prune', function () {
         expect(maintenanceProblems())->toBe([]);
     });
 
+    it('does not warn about an upgraded install until the baseline is past the threshold', function () {
+        Project::factory()->create(['created_at' => now()->subMonths(6)]);
+        MaintenanceRun::factory()->create(['started_at' => now()->subHours(2), 'finished_at' => now()->subHours(2), 'rows_deleted' => null]);
+
+        expect(maintenanceProblems())->toBe([]);
+
+        $this->travelTo(now()->addHours(24));
+
+        expect(maintenanceProblems())->toBe([
+            ['key' => 'prune_overdue', 'last_run_at' => null, 'threshold_hours' => 25],
+        ]);
+    });
+
     it('accepts a run inside the threshold', function () {
-        MaintenanceRun::factory()->create(['finished_at' => now()->subHours(24)->subMinutes(59)]);
+        Project::factory()->create();
+        MaintenanceRun::factory()->create(['started_at' => now()->subHours(24)->subMinutes(59)]);
 
         expect(maintenanceProblems())->toBe([]);
     });
 
     it('warns when the last run is past the threshold', function () {
+        Project::factory()->create();
         $finishedAt = now()->subHours(25)->subMinute();
-        MaintenanceRun::factory()->create(['finished_at' => $finishedAt]);
+        MaintenanceRun::factory()->create(['started_at' => now()->subHours(25)->subMinutes(2), 'finished_at' => $finishedAt]);
 
         expect(maintenanceProblems())->toBe([
             ['key' => 'prune_overdue', 'last_run_at' => $finishedAt->toIso8601String(), 'threshold_hours' => 25],
         ]);
     });
 
+    it('measures the threshold from when the last run started', function () {
+        Project::factory()->create();
+        MaintenanceRun::factory()->create(['started_at' => now()->subHours(25)->subMinute(), 'finished_at' => now()->subHours(23)]);
+
+        expect(maintenanceProblems())->toHaveCount(1);
+    });
+
     it('uses the configured threshold', function () {
         config(['watch.maintenance.prune_overdue_hours' => 48]);
-        MaintenanceRun::factory()->create(['finished_at' => now()->subHours(30)]);
+        Project::factory()->create();
+        MaintenanceRun::factory()->create(['started_at' => now()->subHours(30), 'finished_at' => now()->subHours(30)]);
 
         expect(maintenanceProblems())->toBe([]);
     });
@@ -103,11 +133,18 @@ describe('queue worker', function () {
         ]);
     });
 
-    it('reports the oldest waiting job', function () {
+    it('reports the first waiting job', function () {
         insertQueuedJob(11 * 60);
         insertQueuedJob(30 * 60);
 
         expect(maintenanceProblems()[0]['waiting_since'])->toBe(now()->subMinutes(11)->toIso8601String());
+    });
+
+    it('does not warn when the first waiting job is younger than the threshold', function () {
+        insertQueuedJob(5 * 60);
+        insertQueuedJob(30 * 60);
+
+        expect(maintenanceProblems())->toBe([]);
     });
 
     it('accepts a job that has waited less than the threshold', function () {
@@ -147,7 +184,8 @@ describe('shared Inertia props', function () {
     beforeEach(function () {
         $this->withoutVite();
         Organization::factory()->create();
-        MaintenanceRun::factory()->create(['finished_at' => now()->subDays(3)]);
+        Project::factory()->create();
+        MaintenanceRun::factory()->create(['started_at' => now()->subDays(3), 'finished_at' => now()->subDays(3), 'rows_deleted' => 7]);
     });
 
     it('shows problems to a super admin', function () {
@@ -167,7 +205,7 @@ describe('shared Inertia props', function () {
     });
 
     it('shows no problems when all is well', function () {
-        MaintenanceRun::query()->update(['finished_at' => now()]);
+        MaintenanceRun::query()->update(['started_at' => now(), 'finished_at' => now()]);
         $admin = User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]);
 
         $this->actingAs($admin)->get(route('settings.profile.show'))
@@ -181,7 +219,7 @@ describe('shared Inertia props', function () {
         $this->actingAs($admin)->get(route('settings.projects.index'))
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('lastPrune.finished_at', now()->subDays(3)->toISOString())
-                ->where('lastPrune.rows_deleted', 0));
+                ->where('lastPrune.rows_deleted', 7));
     });
 
     it('sends no last prune before the first run', function () {

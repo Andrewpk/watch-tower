@@ -8,7 +8,7 @@ function describe(problem: MaintenanceProblem): string {
     if (problem.key === 'prune_overdue') {
         const when = problem.last_run_at
             ? `last ran ${formatRelativeTime(problem.last_run_at)}`
-            : 'has never run';
+            : 'has not run since this version was installed';
 
         return `Retention pruning ${when}. Old telemetry is not being deleted, so the database keeps growing until the disk is full. Make sure the scheduler is running (see the Docker guide), or run \`php artisan watch:prune\`.`;
     }
@@ -33,7 +33,7 @@ export function MaintenanceBanner() {
             {maintenanceProblems.map((problem) => (
                 <div
                     key={problem.key}
-                    role="alert"
+                    role="status"
                     className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300"
                 >
                     <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

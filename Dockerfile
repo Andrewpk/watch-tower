@@ -124,15 +124,21 @@ logfile_maxbytes=0
 pidfile=/tmp/supervisord.pid
 childlogdir=/tmp
 
+; The socket permissions (0700, owner only) are the real protection. The fixed
+; credentials only stop supervisord from logging a CRIT about an open socket.
 [unix_http_server]
 file=/tmp/supervisor.sock
 chmod=0700
+username=watch-tower
+password=watch-tower
 
 [rpcinterface:supervisor]
 supervisor.rpcinterface_factory=supervisor.rpcinterface:make_main_rpcinterface
 
 [supervisorctl]
 serverurl=unix:///tmp/supervisor.sock
+username=watch-tower
+password=watch-tower
 
 [group:watch-tower]
 programs=web,queue-worker,scheduler
@@ -155,14 +161,19 @@ stdout_logfile_maxbytes=0
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 
+; The worker needs the database schema (it reads the cache table on start), and
+; AUTORUN_ENABLED is off by default, so a new container has none until the
+; operator runs the migrations. Wait for them instead of crashing into FATAL.
+; `migrate:status --pending=1` exits 1 while migrations are pending or the
+; database is unreachable.
 [program:queue-worker]
-command=php /var/www/html/artisan queue:work --tries=3 --sleep=3 --max-time=3600 --memory=128
+command=sh -c 'until php /var/www/html/artisan migrate:status --pending=1 >/dev/null 2>&1; do sleep 10; done; exec php /var/www/html/artisan queue:work --tries=3 --sleep=3 --max-time=3600 --memory=128'
 directory=/var/www/html
 priority=20
 autostart=%(ENV_RUN_QUEUE_WORKER)s
 autorestart=true
 startsecs=5
-startretries=10
+startretries=100
 stopsignal=TERM
 stopwaitsecs=85
 stopasgroup=true
@@ -179,7 +190,7 @@ priority=30
 autostart=%(ENV_RUN_SCHEDULER)s
 autorestart=true
 startsecs=5
-startretries=10
+startretries=100
 stopsignal=TERM
 stopwaitsecs=20
 stopasgroup=true
@@ -194,22 +205,32 @@ command=/usr/local/bin/watch-tower-exit-on-fatal
 events=PROCESS_STATE_FATAL
 priority=1
 autorestart=true
+startretries=100
 stdout_logfile=NONE
 stderr_logfile=/dev/stderr
 stderr_logfile_maxbytes=0
 EOF
 
 # Supervisor event listener. supervisord gives up on a program that keeps
-# failing to start (FATAL) but keeps running itself; stop it instead so the
-# container exits and the platform's restart policy starts a fresh one.
+# failing to start (FATAL) but keeps running itself. When that program is the
+# web server, stop supervisord so the container exits and the platform's
+# restart policy starts a fresh one. A dead worker or scheduler is only logged:
+# the admin warnings report it, and restarting would not fix its cause.
 COPY --chmod=755 <<'EOF' /usr/local/bin/watch-tower-exit-on-fatal
 #!/bin/sh
 while :; do
     printf 'READY\n'
     IFS= read -r header || exit 0
     payload=$(head -c "${header##*len:}")
-    echo "watch-tower: supervisord gave up on a program ($payload). Stopping the container." >&2
-    kill -TERM "$PPID"
+    case "$payload" in
+        "processname:web "*)
+            echo "watch-tower: supervisord gave up on the web server ($payload). Stopping the container." >&2
+            kill -TERM "$PPID"
+            ;;
+        *)
+            echo "watch-tower: supervisord gave up on a program ($payload). The container keeps running." >&2
+            ;;
+    esac
     printf 'RESULT 2\nOK'
 done
 EOF
