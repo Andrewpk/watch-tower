@@ -3,10 +3,12 @@ import {
     AlertTriangle,
     Check,
     Copy,
+    KeyRound,
     Pencil,
     Plus,
     Trash2,
     Users,
+    X,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -14,14 +16,16 @@ import ProjectAdminController from '@/actions/App/Http/Controllers/Settings/Proj
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsShell } from '@/layouts/settings-shell';
-import type { SharedProps } from '@/types/inertia';
+import type { NewApiKey, SharedProps } from '@/types/inertia';
 
 type Project = {
     id: string;
     name: string;
     slug: string;
     description: string | null;
-    api_key: string;
+    api_key_prefix: string | null;
+    api_key_last_used_at: string | null;
+    previous_api_key_expires_at: string | null;
     sampling_rate: number;
     retention_days: number;
     admins_count: number;
@@ -33,10 +37,38 @@ type Props = {
     projects: Project[];
 };
 
+const GRACE_OPTIONS = [
+    {
+        hours: 0,
+        label: 'None',
+        hint: 'The old key stops working immediately.',
+    },
+    { hours: 1, label: '1 hour', hint: 'The old key works for another hour.' },
+    {
+        hours: 24,
+        label: '24 hours',
+        hint: 'The old key works for another day.',
+    },
+    { hours: 168, label: '7 days', hint: 'The old key works for a week.' },
+];
+
+function formatDateTime(iso: string) {
+    return new Date(iso).toLocaleString();
+}
+
 export default function ProjectsIndex({ projects }: Props) {
-    const { props } = usePage<SharedProps & { flash?: { success?: string } }>();
+    const { props, flash } = usePage<
+        SharedProps & { flash?: { success?: string } }
+    >();
     const flashSuccess = props.flash?.success;
+    const flashedApiKey = flash.new_api_key ?? null;
+    const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+    const newApiKey =
+        flashedApiKey && flashedApiKey.key !== dismissedKey
+            ? flashedApiKey
+            : null;
     const [target, setTarget] = useState<Project | null>(null);
+    const [rotateTarget, setRotateTarget] = useState<Project | null>(null);
 
     return (
         <SettingsShell>
@@ -63,6 +95,13 @@ export default function ProjectsIndex({ projects }: Props) {
                     <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
                         {flashSuccess}
                     </div>
+                )}
+
+                {newApiKey && (
+                    <NewKeyPanel
+                        apiKey={newApiKey}
+                        onDismiss={() => setDismissedKey(newApiKey.key)}
+                    />
                 )}
 
                 <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -112,7 +151,24 @@ export default function ProjectsIndex({ projects }: Props) {
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <CopyKey value={project.api_key} />
+                                            <span className="inline-flex rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-muted-foreground">
+                                                {project.api_key_prefix
+                                                    ? `${project.api_key_prefix}…`
+                                                    : '—'}
+                                            </span>
+                                            <div className="mt-1 text-xs text-muted-foreground">
+                                                {project.api_key_last_used_at
+                                                    ? `Last used ${formatDateTime(project.api_key_last_used_at)}`
+                                                    : 'Never used'}
+                                            </div>
+                                            {project.previous_api_key_expires_at && (
+                                                <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+                                                    Previous key valid until{' '}
+                                                    {formatDateTime(
+                                                        project.previous_api_key_expires_at,
+                                                    )}
+                                                </div>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-muted-foreground">
                                             {Math.round(
@@ -153,6 +209,16 @@ export default function ProjectsIndex({ projects }: Props) {
                                                 <Button
                                                     variant="ghost"
                                                     size="sm"
+                                                    title="Rotate API key"
+                                                    onClick={() =>
+                                                        setRotateTarget(project)
+                                                    }
+                                                >
+                                                    <KeyRound className="h-3.5 w-3.5" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
                                                     onClick={() =>
                                                         setTarget(project)
                                                     }
@@ -170,6 +236,13 @@ export default function ProjectsIndex({ projects }: Props) {
                 </div>
             </div>
 
+            {rotateTarget && (
+                <RotateKeyDialog
+                    project={rotateTarget}
+                    onClose={() => setRotateTarget(null)}
+                />
+            )}
+
             {target && (
                 <DeleteDialog
                     project={target}
@@ -180,7 +253,49 @@ export default function ProjectsIndex({ projects }: Props) {
     );
 }
 
-function CopyKey({ value }: { value: string }) {
+function NewKeyPanel({
+    apiKey,
+    onDismiss,
+}: {
+    apiKey: NewApiKey;
+    onDismiss: () => void;
+}) {
+    return (
+        <div
+            role="status"
+            className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/40"
+        >
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <h2 className="font-semibold text-amber-900 dark:text-amber-200">
+                        API key for {apiKey.project}
+                    </h2>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">
+                        Copy this key now. It won't be shown again, only a short
+                        prefix is kept.
+                    </p>
+                </div>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onDismiss}
+                    title="Dismiss"
+                    aria-label="Dismiss"
+                >
+                    <X className="h-3.5 w-3.5" />
+                </Button>
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+                <code className="min-w-0 flex-1 rounded-md border border-border bg-background px-3 py-2 font-mono text-xs break-all text-foreground">
+                    {apiKey.key}
+                </code>
+                <CopyButton value={apiKey.key} />
+            </div>
+        </div>
+    );
+}
+
+function CopyButton({ value }: { value: string }) {
     const [copied, setCopied] = useState(false);
 
     const copy = async () => {
@@ -201,23 +316,115 @@ function CopyKey({ value }: { value: string }) {
         setTimeout(() => setCopied(false), 1500);
     };
 
-    const masked =
-        value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+    return (
+        <Button variant="outline" size="sm" onClick={copy}>
+            {copied ? (
+                <Check className="h-3.5 w-3.5 text-emerald-600" />
+            ) : (
+                <Copy className="h-3.5 w-3.5" />
+            )}
+            {copied ? 'Copied' : 'Copy'}
+        </Button>
+    );
+}
+
+function RotateKeyDialog({
+    project,
+    onClose,
+}: {
+    project: Project;
+    onClose: () => void;
+}) {
+    const [graceHours, setGraceHours] = useState(24);
+    const [error, setError] = useState<string | null>(null);
+    const [processing, setProcessing] = useState(false);
+
+    const submit = () => {
+        setProcessing(true);
+        setError(null);
+        router.post(
+            ProjectAdminController.rotateKey.url({ project: project.slug }),
+            { grace_hours: graceHours },
+            {
+                onError: (errs) =>
+                    setError(
+                        (errs.grace_hours as string) ??
+                            'Failed to rotate the API key.',
+                    ),
+                onFinish: () => setProcessing(false),
+                onSuccess: () => onClose(),
+            },
+        );
+    };
 
     return (
-        <button
-            type="button"
-            onClick={copy}
-            title={copied ? 'Copied!' : `Copy ${value}`}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-            <span>{masked}</span>
-            {copied ? (
-                <Check className="h-3 w-3 text-emerald-600" />
-            ) : (
-                <Copy className="h-3 w-3" />
-            )}
-        </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
+            <div className="w-full max-w-md rounded-lg border border-border bg-card shadow-xl">
+                <div className="flex items-start gap-3 border-b border-border px-5 py-4">
+                    <span className="grid h-9 w-9 place-items-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
+                        <KeyRound className="h-5 w-5" />
+                    </span>
+                    <div>
+                        <h2 className="text-base font-semibold tracking-tight">
+                            Rotate API key
+                        </h2>
+                        <p className="text-xs text-muted-foreground">
+                            This issues a new key for{' '}
+                            <span className="font-medium text-foreground">
+                                {project.name}
+                            </span>
+                            . After the grace period, agents still using the old
+                            key are rejected until their NIGHTWATCH_TOKEN is
+                            updated.
+                        </p>
+                    </div>
+                </div>
+
+                <fieldset className="space-y-2 px-5 py-4">
+                    <legend className="mb-2 text-xs text-muted-foreground">
+                        Keep the old key working for:
+                    </legend>
+                    {GRACE_OPTIONS.map((option) => (
+                        <label
+                            key={option.hours}
+                            className="flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-2 text-sm has-checked:border-primary has-checked:bg-muted/50"
+                        >
+                            <input
+                                type="radio"
+                                name="grace_hours"
+                                value={option.hours}
+                                checked={graceHours === option.hours}
+                                onChange={() => setGraceHours(option.hours)}
+                                className="mt-1"
+                            />
+                            <span>
+                                <span className="font-medium">
+                                    {option.label}
+                                </span>
+                                <span className="block text-xs text-muted-foreground">
+                                    {option.hint}
+                                </span>
+                            </span>
+                        </label>
+                    ))}
+                    {error && <p className="text-xs text-rose-600">{error}</p>}
+                </fieldset>
+
+                <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3">
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onClose}
+                        disabled={processing}
+                    >
+                        Cancel
+                    </Button>
+                    <Button size="sm" onClick={submit} disabled={processing}>
+                        {processing ? 'Rotating…' : 'Rotate key'}
+                    </Button>
+                </div>
+            </div>
+        </div>
     );
 }
 

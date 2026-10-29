@@ -15,6 +15,10 @@ class AuthenticateNightwatchIngest
      * Authenticate ingest requests using the short-lived token
      * issued by the /api/agent-auth endpoint.
      *
+     * A token records the version of the API key it was issued for and stops
+     * working once that key has been rotated away (see
+     * `Project::acceptsApiKeyVersion()`).
+     *
      * @param  Closure(Request): (Response)  $next
      */
     public function handle(Request $request, Closure $next): Response
@@ -43,6 +47,12 @@ class AuthenticateNightwatchIngest
 
         if (! $project) {
             return $this->unauthorized('Unknown project');
+        }
+
+        $keyVersion = isset($payload['key_version']) ? (int) $payload['key_version'] : null;
+
+        if (! $project->acceptsApiKeyVersion($keyVersion)) {
+            return $this->unauthorized('Revoked ingest token');
         }
 
         $request->attributes->set('watch_project', $project);

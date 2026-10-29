@@ -17,3 +17,8 @@ export type SharedProps = {
     currentProject: CurrentProject | null;
     projects: ProjectSummary[];
 };
+
+export type NewApiKey = {
+    project: string;
+    key: string;
+};

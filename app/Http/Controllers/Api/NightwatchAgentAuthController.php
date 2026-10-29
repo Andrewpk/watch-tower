@@ -16,6 +16,9 @@ class NightwatchAgentAuthController extends Controller
      * The agent calls this on startup, then again every {refresh_in} seconds.
      * The response shape is the contract enforced by agent.phar's
      * IngestDetailsRepository::parseResponse.
+     *
+     * The token records the version of the key the agent authenticated with, so
+     * rotating the key revokes the tokens issued under it.
      */
     public function __invoke(Request $request): JsonResponse
     {
@@ -28,6 +31,7 @@ class NightwatchAgentAuthController extends Controller
         $token = Crypt::encryptString(json_encode([
             'project_id' => $project->id,
             'expires_at' => time() + $expiresIn,
+            'key_version' => $project->apiKeyVersionFor((string) $request->bearerToken()),
         ], JSON_THROW_ON_ERROR));
 
         return response()->json([

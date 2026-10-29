@@ -50,18 +50,7 @@ class DemoDataSeeder extends Seeder
             ]
         ))->all();
 
-        $project = Project::query()->firstOrCreate(
-            ['slug' => 'acme-app'],
-            [
-                'organization_id' => $organization->id,
-                'name' => 'Acme App',
-                'description' => 'Production demo project',
-                'api_key' => 'pk_demo_'.Str::random(40),
-                'api_secret_hash' => Hash::make('sk_demo_'.Str::random(40)),
-                'sampling_rate' => 1.0,
-                'retention_days' => 30,
-            ]
-        );
+        $project = $this->ensureDemoProject($organization);
 
         $this->command?->info("Seeding traces for project: {$project->name}");
 
@@ -161,6 +150,39 @@ class DemoDataSeeder extends Seeder
         $this->seedCache($project, $start);
         $this->seedOutgoingRequests($project, $start);
         $this->seedLogs($project, $start, $teamUsers);
+    }
+
+    /**
+     * Find or create the demo project.
+     *
+     * Only the hash of a project's API key is stored, so the key of a newly
+     * created project is printed to the console: this is the only time it can
+     * be read.
+     */
+    public function ensureDemoProject(Organization $organization): Project
+    {
+        $project = Project::query()->where('slug', 'acme-app')->first();
+
+        if ($project !== null) {
+            $this->command?->info("Project {$project->name} already exists; its API key is stored hashed and cannot be shown. Rotate it in Settings > Projects to get a new one.");
+
+            return $project;
+        }
+
+        $project = new Project([
+            'organization_id' => $organization->id,
+            'slug' => 'acme-app',
+            'name' => 'Acme App',
+            'description' => 'Production demo project',
+            'sampling_rate' => 1.0,
+            'retention_days' => 30,
+        ]);
+        $apiKey = $project->issueApiKey();
+        $project->save();
+
+        $this->command?->info("Demo API key for {$project->name} (only its hash is stored, copy it now): {$apiKey}");
+
+        return $project;
     }
 
     /**
