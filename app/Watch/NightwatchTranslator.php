@@ -94,6 +94,8 @@ class NightwatchTranslator
             'id' => $this->scalarString($r['_group'] ?? null),
             'data' => [
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'sql' => mb_strcut($this->scalarString($r['sql'] ?? null), 0, 65_535, 'UTF-8'),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'duration_ms' => $this->microsToFractionalMillis($r['duration'] ?? null),
@@ -145,6 +147,8 @@ class NightwatchTranslator
                 'hostname' => $this->limit($r['server'] ?? null, 255),
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'release' => $this->limit($r['deploy'] ?? null, 255),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -210,6 +214,8 @@ class NightwatchTranslator
                 'operation' => mb_substr($this->normalizeCacheOperation($r['type'] ?? null), 0, 20),
                 'succeeded' => $this->cacheSucceeded($r),
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+                'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -249,6 +255,7 @@ class NightwatchTranslator
                 'completed_at' => $status === 'completed' ? $finishedAt : null,
                 'failed_at' => $status === 'failed' ? $finishedAt : null,
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'exception' => $preview === null ? null : ['message' => $preview],
                 'user_id' => $this->limit($r['user'] ?? null, 255),
             ],
@@ -287,6 +294,7 @@ class NightwatchTranslator
             'data' => [
                 'request_id' => $this->limit($r['trace_id'] ?? null, 255),
                 'command' => $name,
+                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'arguments' => $arguments,
                 'options' => $options,
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
@@ -321,6 +329,13 @@ class NightwatchTranslator
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
                 'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
+                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
+                'timezone' => $this->limit($r['timezone'] ?? null, 64),
+                'repeat_seconds' => $this->boundedInt($r['repeat_seconds'] ?? null, 65_535),
+                'without_overlapping' => $this->boolOrNull($r['without_overlapping'] ?? null),
+                'on_one_server' => $this->boolOrNull($r['on_one_server'] ?? null),
+                'run_in_background' => $this->boolOrNull($r['run_in_background'] ?? null),
+                'even_in_maintenance_mode' => $this->boolOrNull($r['even_in_maintenance_mode'] ?? null),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
         ];
@@ -570,6 +585,15 @@ class NightwatchTranslator
         $int = (int) $value;
 
         return $int >= 0 && $int <= $max ? $int : null;
+    }
+
+    /**
+     * A strict boolean: anything that is not a real `true` or `false` (including `'yes'`, `1` and arrays) is null,
+     * meaning unknown.
+     */
+    private function boolOrNull(mixed $value): ?bool
+    {
+        return is_bool($value) ? $value : null;
     }
 
     /**

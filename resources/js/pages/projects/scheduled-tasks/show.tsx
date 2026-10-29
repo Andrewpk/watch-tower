@@ -41,10 +41,20 @@ type Bucket = {
 
 type Run = {
     id: string;
+    memory_peak_kb: number | null;
     status: string;
     duration_ms: number | null;
     exit_code: number | null;
     occurred_at: string | null;
+};
+
+type TaskOptions = {
+    timezone: string | null;
+    repeat_seconds: number | null;
+    without_overlapping: boolean | null;
+    on_one_server: boolean | null;
+    run_in_background: boolean | null;
+    even_in_maintenance_mode: boolean | null;
 };
 
 type Detail = {
@@ -53,6 +63,7 @@ type Detail = {
     schedule: string | null;
     schedule_summary: string | null;
     next_run_at: string | null;
+    options: TaskOptions;
     totals: {
         total: number;
         processed: number;
@@ -136,13 +147,21 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                 Scheduled Tasks
                             </Link>
                         </div>
-                        <div className="flex items-center gap-3 font-mono">
+                        <div className="flex flex-wrap items-center gap-3 font-mono">
                             <span>{detail.task}</span>
                             {(detail.schedule_summary ?? detail.schedule) ? (
                                 <span className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                                     {detail.schedule_summary ?? detail.schedule}
                                 </span>
                             ) : null}
+                            {optionChips(detail.options).map((chip) => (
+                                <span
+                                    key={chip}
+                                    className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                                >
+                                    {chip}
+                                </span>
+                            ))}
                         </div>
                     </div>
                 }
@@ -226,6 +245,9 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                 <TableRow>
                                     <TableHead className="w-72">DATE</TableHead>
                                     <TableHead>STATUS</TableHead>
+                                    <TableHead className="w-32 text-right">
+                                        PEAK MEMORY
+                                    </TableHead>
                                     <TableHead className="text-right">
                                         DURATION
                                     </TableHead>
@@ -236,7 +258,7 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                 {filteredRuns.length === 0 ? (
                                     <TableRow>
                                         <TableCell
-                                            colSpan={4}
+                                            colSpan={5}
                                             className="py-10 text-center text-sm text-muted-foreground"
                                         >
                                             No runs match the current filters
@@ -252,6 +274,9 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                                 <ScheduledTaskStatusBadge
                                                     status={run.status}
                                                 />
+                                            </TableCell>
+                                            <TableCell className="py-2.5 text-right font-mono text-xs">
+                                                {formatKb(run.memory_peak_kb)}
                                             </TableCell>
                                             <TableCell className="py-2.5 text-right font-mono text-xs">
                                                 {formatMs(run.duration_ms)}
@@ -576,6 +601,51 @@ function formatMs(value: number | null): string {
     }
 
     return `${Math.round(value)} ms`;
+}
+
+function formatKb(value: number | null): string {
+    if (value === null || Number.isNaN(value)) {
+        return '—';
+    }
+
+    if (value >= 1024) {
+        return `${(value / 1024).toFixed(1)} MB`;
+    }
+
+    return `${value} KB`;
+}
+
+/**
+ * The scheduled task options worth showing: the timezone, the sub-minute interval, and each flag that is on.
+ */
+function optionChips(options: TaskOptions): string[] {
+    const chips: string[] = [];
+
+    if (options.timezone) {
+        chips.push(options.timezone);
+    }
+
+    if (options.repeat_seconds !== null && options.repeat_seconds > 0) {
+        chips.push(`every ${options.repeat_seconds}s`);
+    }
+
+    if (options.without_overlapping) {
+        chips.push('without overlapping');
+    }
+
+    if (options.on_one_server) {
+        chips.push('on one server');
+    }
+
+    if (options.run_in_background) {
+        chips.push('in background');
+    }
+
+    if (options.even_in_maintenance_mode) {
+        chips.push('even in maintenance');
+    }
+
+    return chips;
 }
 
 function formatTime(iso: string): string {

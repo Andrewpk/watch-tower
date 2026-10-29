@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'operation',
     'succeeded',
     'duration_ms',
+    'source_type',
+    'source_label',
     'environment',
     'occurred_at',
 ])]

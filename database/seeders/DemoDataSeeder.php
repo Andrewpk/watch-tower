@@ -248,6 +248,7 @@ class DemoDataSeeder extends Seeder
                 'file' => 'app/Jobs/SendInvoice.php',
                 'line' => 41,
                 'is_handled' => false,
+                'job' => 'App\\Jobs\\SendInvoice',
                 'stacktrace' => [
                     ['file' => 'app/Jobs/SendInvoice.php', 'line' => 41, 'function' => 'handle', 'class' => 'App\\Jobs\\SendInvoice'],
                     ['file' => 'vendor/laravel/framework/src/Illuminate/Queue/CallQueuedHandler.php', 'line' => 122, 'function' => 'call', 'class' => 'Illuminate\\Queue\\CallQueuedHandler'],
@@ -327,6 +328,12 @@ class DemoDataSeeder extends Seeder
                 $errorUser = $endUsers[array_rand($endUsers)];
             }
 
+            $source = isset($tpl['job'])
+                ? ['type' => 'job', 'label' => $tpl['job']]
+                : ($trace !== null
+                    ? ['type' => 'request', 'label' => $trace['method'].' '.$trace['uri']]
+                    : ['type' => null, 'label' => null]);
+
             $fingerprint = $fingerprinter->forException([
                 'class' => $tpl['class'],
                 'file' => $tpl['file'],
@@ -393,6 +400,8 @@ class DemoDataSeeder extends Seeder
                 'context' => json_encode([
                     'request' => ['method' => 'GET', 'url' => '/api/example'],
                 ]),
+                'source_type' => $source['type'],
+                'source_label' => $source['label'],
                 'occurred_at' => $occurredAt,
                 'created_at' => $occurredAt,
                 'updated_at' => $occurredAt,
@@ -495,6 +504,8 @@ class DemoDataSeeder extends Seeder
                     'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                     'is_n_plus_one' => $totalCalls > 1200 && random_int(1, 4) === 1,
                     'is_slow' => $duration > 25,
+                    'source_type' => 'request',
+                    'source_label' => $trace['method'].' '.$trace['uri'],
                     'occurred_at' => $trace['occurred_at'],
                     'created_at' => $trace['occurred_at'],
                     'updated_at' => $trace['occurred_at'],
@@ -526,6 +537,8 @@ class DemoDataSeeder extends Seeder
                 'row_count' => $template['type'] === 'select' ? random_int(0, 50) : null,
                 'is_n_plus_one' => false,
                 'is_slow' => $duration > 25,
+                'source_type' => 'request',
+                'source_label' => $trace['method'].' '.$trace['uri'],
                 'occurred_at' => $trace['occurred_at'],
                 'created_at' => $trace['occurred_at'],
                 'updated_at' => $trace['occurred_at'],
@@ -615,6 +628,7 @@ class DemoDataSeeder extends Seeder
                 'job_class' => $jobClasses[array_rand($jobClasses)],
                 'queue' => $queues[array_rand($queues)],
                 'connection' => $connections[array_rand($connections)],
+                'memory_peak_kb' => $status === 'queued' ? null : random_int(18_000, 96_000),
                 'dispatched_at' => $dispatched,
                 'started_at' => $startedAt,
                 'completed_at' => $completedAt,
@@ -671,6 +685,7 @@ class DemoDataSeeder extends Seeder
                 'id' => (string) Str::uuid(),
                 'project_id' => $project->id,
                 'command' => $tpl['command'],
+                'memory_peak_kb' => random_int(14_000, 128_000),
                 'arguments' => json_encode([]),
                 'options' => json_encode(['--quiet' => false]),
                 'status' => $status,
@@ -788,6 +803,13 @@ class DemoDataSeeder extends Seeder
                     'status' => $status,
                     'exit_code' => $exitCode,
                     'duration_ms' => $duration,
+                    'memory_peak_kb' => $status === 'skipped' ? null : random_int(12_000, 64_000),
+                    'timezone' => 'UTC',
+                    'repeat_seconds' => null,
+                    'without_overlapping' => $tpl['skip_rate'] > 0,
+                    'on_one_server' => false,
+                    'run_in_background' => $tpl['base_duration'] > 1_000,
+                    'even_in_maintenance_mode' => false,
                     'threshold_ms' => null,
                     'output' => $status === 'failed'
                         ? "Error: process exited with code {$exitCode}"
@@ -1023,6 +1045,7 @@ class DemoDataSeeder extends Seeder
 
         $environments = ['production', 'production', 'production', 'staging'];
         $stores = ['redis', 'redis', 'redis', 'database'];
+        $sources = ['GET /dashboard', 'GET /api/orders', 'POST /api/orders'];
 
         $rows = [];
 
@@ -1062,6 +1085,8 @@ class DemoDataSeeder extends Seeder
                         'operation' => $event['op'],
                         'succeeded' => $succeeded,
                         'duration_ms' => $duration,
+                        'source_type' => 'request',
+                        'source_label' => $sources[array_rand($sources)],
                         'environment' => $environments[array_rand($environments)],
                         'occurred_at' => $occurredAt,
                         'created_at' => $occurredAt,

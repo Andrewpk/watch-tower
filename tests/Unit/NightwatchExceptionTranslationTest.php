@@ -47,6 +47,8 @@ it('translates a v3 exception record', function () {
             'hostname' => 'web-1',
             'user_id' => 'user-1',
             'release' => 'v1.4.2',
+            'source_type' => null,
+            'source_label' => null,
             'occurred_at' => '2026-07-01T10:15:00+00:00',
         ],
     ]);

@@ -142,10 +142,11 @@ class ScheduledTaskStats
      *   schedule:string|null,
      *   schedule_summary:string|null,
      *   next_run_at:string|null,
+     *   options: array{timezone:string|null,repeat_seconds:int|null,without_overlapping:bool|null,on_one_server:bool|null,run_in_background:bool|null,even_in_maintenance_mode:bool|null},
      *   totals: array{total:int,processed:int,skipped:int,failed:int},
      *   duration: array{min_ms:int|null,max_ms:int|null,avg_ms:float|null,p95_ms:float|null,threshold_ms:int|null},
      *   buckets: list<array{bucket:string,processed:int,skipped:int,failed:int,avg_duration:float|null,p95_duration:float|null}>,
-     *   runs: list<array{id:string,status:string,duration_ms:int|null,exit_code:int|null,occurred_at:string|null}>
+     *   runs: list<array{id:string,memory_peak_kb:int|null,status:string,duration_ms:int|null,exit_code:int|null,occurred_at:string|null}>
      * }|null
      */
     public function taskDetail(Project $project, TimeRange $range, string $taskHash): ?array
@@ -163,9 +164,10 @@ class ScheduledTaskStats
         $runs = (clone $base)
             ->orderByDesc('occurred_at')
             ->limit(200)
-            ->get(['id', 'status', 'duration_ms', 'exit_code', 'occurred_at'])
+            ->get(['id', 'memory_peak_kb', 'status', 'duration_ms', 'exit_code', 'occurred_at'])
             ->map(fn (ScheduledTaskRun $run) => [
                 'id' => $run->id,
+                'memory_peak_kb' => $run->memory_peak_kb,
                 'status' => $run->status,
                 'duration_ms' => $run->duration_ms,
                 'exit_code' => $run->exit_code,
@@ -179,6 +181,14 @@ class ScheduledTaskStats
             'schedule' => $latest->schedule,
             'schedule_summary' => $latest->schedule_summary,
             'next_run_at' => $latest->next_run_at?->toIso8601String(),
+            'options' => [
+                'timezone' => $latest->timezone,
+                'repeat_seconds' => $latest->repeat_seconds,
+                'without_overlapping' => $latest->without_overlapping,
+                'on_one_server' => $latest->on_one_server,
+                'run_in_background' => $latest->run_in_background,
+                'even_in_maintenance_mode' => $latest->even_in_maintenance_mode,
+            ],
             'totals' => $summary['totals'],
             'duration' => $summary['duration'],
             'buckets' => $summary['buckets'],

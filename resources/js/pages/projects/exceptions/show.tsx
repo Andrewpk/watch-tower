@@ -768,7 +768,10 @@ function OccurrencesTable({ exception }: { exception: ExceptionDetail }) {
                                 <span className="font-mono text-[12px] text-muted-foreground">
                                     {formatAbsoluteShort(row.occurred_at)}
                                 </span>
-                                <span className="flex min-w-0 items-center gap-2">
+                                <span
+                                    className="flex min-w-0 items-center gap-2"
+                                    title={`Triggered by ${row.source_type}${row.source_label ? ` ${row.source_label}` : ''}`}
+                                >
                                     <SourceBadge type={row.source_type} />
                                     {row.source_label && (
                                         <span
