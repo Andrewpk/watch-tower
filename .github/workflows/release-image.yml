@@ -5,7 +5,9 @@ name: Release image
 # (Actions > Release image > Run workflow), only check that it builds.
 #
 # Release tags must be semver, e.g. v1.2.3. They produce the tags 1.2.3, 1.2 and
-# latest. A pre-release such as v1.0.0-rc.1 only gets its exact version tag.
+# latest. A pre-release such as v1.0.0-rc.1 produces 1.0.0-rc.1 and latest.
+# Every published release moves latest, including pre-releases and releases of
+# an older version.
 
 on:
   release:
@@ -57,10 +59,12 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
-          # latest=auto adds "latest" for stable semver tags only. Pre-releases
-          # only extend {{version}}, so v1.0.0-rc.1 becomes 1.0.0-rc.1.
+          # latest=true adds "latest" to every release, pre-releases included.
+          # Pre-releases skip {{major}}.{{minor}}, so v1.0.0-rc.1 becomes
+          # 1.0.0-rc.1 and latest. PR and manual runs have no semver tag, so
+          # they get no tags at all.
           flavor: |
-            latest=auto
+            latest=true
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
