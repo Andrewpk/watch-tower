@@ -13,11 +13,11 @@ use Illuminate\Support\Str;
  *
  * Returns null for record types we don't (yet) persist.
  *
- * The wire `deploy` is the deployment id (`nightwatch.deployment`), not an environment name: it is stored as the
- * release on requests and exceptions, and the wire carries no environment name, so no translation sets one.
+ * The wire `deploy` is the deployment id (`nightwatch.deployment`), not an environment name, and the wire carries
+ * no environment name at all. Requests store it as the release.
  *
- * Every string is cut to its column length and non-scalar values are dropped, so one malformed record cannot
- * fail the whole batch.
+ * Every string is cut to its column length, non-scalar values are dropped, numbers are clamped to their unsigned
+ * column range and unusable timestamps become null, so one malformed record cannot fail the whole batch.
  */
 class NightwatchTranslator
 {
@@ -65,7 +65,7 @@ class NightwatchTranslator
                 'status_code' => $this->boundedInt($r['status_code'] ?? null, 65535),
                 'user_id' => $this->limit($r['user'] ?? null, 255),
                 'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
-                'db_queries_count' => (int) ($r['queries'] ?? 0),
+                'db_queries_count' => $this->unsignedCount($r['queries'] ?? null),
                 'memory_used_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'release' => $this->limit($r['deploy'] ?? null, 255),
@@ -214,11 +214,11 @@ class NightwatchTranslator
                 'queue' => $this->limit($r['queue'] ?? null, 100),
                 'connection' => $this->limit($r['connection'] ?? null, 100),
                 'status' => $status,
-                'attempts' => (int) ($r['attempt'] ?? 1),
+                'attempts' => $this->unsignedCount($r['attempt'] ?? null, 1),
                 'started_at' => $this->timestampToIso($r['timestamp'] ?? null),
                 'completed_at' => $status === 'completed' ? $finishedAt : null,
                 'failed_at' => $status === 'failed' ? $finishedAt : null,
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'exception' => $preview === null ? null : ['message' => $preview],
                 'user_id' => $this->limit($r['user'] ?? null, 255),
             ],
@@ -230,11 +230,11 @@ class NightwatchTranslator
      */
     private function timestampPlusMicrosToIso(mixed $timestamp, mixed $micros): ?string
     {
-        if ($timestamp === null || $timestamp === '') {
+        if (! is_numeric($timestamp) || $this->timestampToIso($timestamp) === null) {
             return null;
         }
 
-        return $this->timestampToIso((float) $timestamp + ((int) $micros) / 1_000_000);
+        return $this->timestampToIso((float) $timestamp + (is_numeric($micros) ? (float) $micros : 0.0) / 1_000_000);
     }
 
     /**
@@ -384,13 +384,27 @@ class NightwatchTranslator
 
     /**
      * Microseconds to milliseconds, clamped to the unsigned 32-bit range of the `duration_ms` columns (a
-     * long-running daemon command would otherwise overflow them on MySQL).
+     * long-running daemon command would otherwise overflow them on MySQL); null when the value is not numeric.
      */
     private function unsignedDurationMs(mixed $value): ?int
     {
-        $millis = $this->microsToMillis($value);
+        if (! is_numeric($value)) {
+            return null;
+        }
 
-        return $millis === null ? null : max(0, min($millis, 4_294_967_295));
+        return (int) max(0.0, min(round((float) $value / 1000), 4_294_967_295.0));
+    }
+
+    /**
+     * A count for an unsigned 32-bit column: clamped to 0..4294967295, and `$default` when the value is not numeric.
+     */
+    private function unsignedCount(mixed $value, int $default = 0): int
+    {
+        if (! is_numeric($value)) {
+            return $default;
+        }
+
+        return (int) max(0.0, min(floor((float) $value), 4_294_967_295.0));
     }
 
     private function scalarString(mixed $value): string
@@ -415,10 +429,10 @@ class NightwatchTranslator
                 'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownMailable',
                 'mailer' => $this->limit($r['mailer'] ?? null, 50),
                 'subject' => $this->limit($r['subject'] ?? null, 255),
-                'recipients_count' => (int) ($r['to'] ?? 0) + (int) ($r['cc'] ?? 0) + (int) ($r['bcc'] ?? 0),
-                'attachments_count' => (int) ($r['attachments'] ?? 0),
+                'recipients_count' => min($this->unsignedCount($r['to'] ?? null) + $this->unsignedCount($r['cc'] ?? null) + $this->unsignedCount($r['bcc'] ?? null), 4_294_967_295),
+                'attachments_count' => $this->unsignedCount($r['attachments'] ?? null),
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 ...$this->sourceFields($r),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -439,7 +453,7 @@ class NightwatchTranslator
                 'class' => $this->limit($this->withoutAnonymousSuffix($r['class'] ?? null), 255) ?? 'UnknownNotification',
                 'channel' => $this->limit($this->channelName($r['channel'] ?? null), 50) ?? 'unknown',
                 'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 ...$this->sourceFields($r),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -463,7 +477,7 @@ class NightwatchTranslator
                 'host' => $this->limit($r['host'] ?? null, 255) ?? '',
                 'url' => $this->limit($r['url'] ?? null, 2048) ?? '',
                 'status_code' => $this->boundedInt($r['status_code'] ?? null, 65535),
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4294967295),
                 'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4294967295),
                 ...$this->sourceFields($r),
@@ -563,7 +577,8 @@ class NightwatchTranslator
 
         return match ($op) {
             'hit', 'miss', 'write', 'delete' => $op,
-            'forget' => 'delete',
+            'forget', 'delete-failure', 'delete-failed', 'forget-failed' => 'delete',
+            'write-failure', 'write-failed' => 'write',
             default => $op === '' ? 'unknown' : $op,
         };
     }
@@ -579,7 +594,7 @@ class NightwatchTranslator
 
         $op = is_string($r['type'] ?? null) ? strtolower($r['type']) : '';
 
-        return ! in_array($op, ['write-failed', 'forget-failed', 'failed'], true);
+        return ! in_array($op, ['write-failure', 'delete-failure', 'write-failed', 'delete-failed', 'forget-failed', 'failed'], true);
     }
 
     private function microsToMillis(mixed $value): ?int
@@ -593,20 +608,30 @@ class NightwatchTranslator
 
     private function bytesToKilobytes(mixed $value): ?int
     {
-        if ($value === null || $value === '') {
+        if (! is_numeric($value)) {
             return null;
         }
 
-        return (int) round(((int) $value) / 1024);
+        return (int) max(0.0, min(round((float) $value / 1024), 4_294_967_295.0));
     }
 
     private function timestampToIso(mixed $value): ?string
     {
-        if ($value === null || $value === '') {
+        if (! is_numeric($value)) {
             return null;
         }
 
-        return CarbonImmutable::createFromTimestamp((float) $value)->toIso8601String();
+        $seconds = (float) $value;
+
+        if ($seconds <= 0 || $seconds >= 1e11) {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::createFromTimestamp($seconds)->toIso8601String();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     private function decodeMaybeJson(mixed $value): mixed
@@ -641,10 +666,6 @@ class NightwatchTranslator
      */
     private function limit(mixed $value, int $length): ?string
     {
-        if (! is_scalar($value)) {
-            return null;
-        }
-
         $string = $this->stringOrNull($value);
 
         return $string === null ? null : mb_substr($string, 0, $length);

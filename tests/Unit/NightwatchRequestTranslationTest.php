@@ -225,4 +225,130 @@ it('does not throw on array values in job, command, mail and other records', fun
 
     expect($event['id'])->toBe('')
         ->and($event['data'])->not->toHaveKey('environment');
+
+    if ($type === 'job-attempt') {
+        expect($event['data']['exception'])->toBeNull();
+    }
 })->with(['queued-job', 'job-attempt', 'command', 'scheduled-task', 'mail', 'notification', 'outgoing-request']);
+
+it('cuts multibyte strings by characters and keeps them valid UTF-8', function () {
+    $data = (new NightwatchTranslator)->translate(nightwatchRequestTranslationRecord([
+        'deploy' => str_repeat('é', 300),
+        'server' => str_repeat('é', 300),
+    ]))['data'];
+
+    expect(mb_strlen($data['release']))->toBe(255)
+        ->and(mb_check_encoding($data['release'], 'UTF-8'))->toBeTrue()
+        ->and(mb_strlen($data['hostname']))->toBe(255)
+        ->and(mb_check_encoding($data['hostname'], 'UTF-8'))->toBeTrue();
+});
+
+it('translates a job attempt with an array exception preview and no exception', function () {
+    $event = (new NightwatchTranslator)->translate([
+        't' => 'job-attempt',
+        'attempt_id' => '33333333-3333-4333-8333-333333333333',
+        'job_id' => '22222222-2222-4222-8222-222222222222',
+        'status' => 'failed',
+        'exception_preview' => ['x'],
+    ]);
+
+    expect($event['data']['exception'])->toBeNull();
+});
+
+it('turns an unusable timestamp into null instead of throwing', function (mixed $timestamp) {
+    $translator = new NightwatchTranslator;
+
+    expect($translator->translate(nightwatchRequestTranslationRecord(['timestamp' => $timestamp]))['data']['occurred_at'])->toBeNull();
+
+    $attempt = $translator->translate([
+        't' => 'job-attempt',
+        'attempt_id' => 'attempt-1',
+        'job_id' => 'job-1',
+        'status' => 'failed',
+        'timestamp' => $timestamp,
+        'duration' => 1_000_000,
+    ])['data'];
+
+    expect($attempt['started_at'])->toBeNull()
+        ->and($attempt['failed_at'])->toBeNull();
+})->with([
+    'microsecond timestamp' => 1_730_000_000_000_000,
+    'float microsecond timestamp' => 1.73e15,
+    'exponent string' => '1e15',
+    'not a number' => 'soon',
+    'array' => [['x']],
+    'zero' => 0,
+    'negative' => -5,
+    'infinity' => INF,
+]);
+
+it('adds a duration to a job attempt timestamp only when both are usable', function () {
+    $translator = new NightwatchTranslator;
+    $at = CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp();
+    $base = ['t' => 'job-attempt', 'attempt_id' => 'a', 'job_id' => 'j', 'status' => 'processed', 'timestamp' => $at];
+
+    expect($translator->translate($base + ['duration' => 2_000_000])['data']['completed_at'])->toBe('2026-07-01T10:15:02+00:00')
+        ->and($translator->translate($base + ['duration' => 'abc'])['data']['completed_at'])->toBe('2026-07-01T10:15:00+00:00')
+        ->and($translator->translate($base + ['duration' => 1e30])['data']['completed_at'])->toBeNull();
+});
+
+it('clamps negative and oversized numbers to the unsigned column range', function () {
+    $translator = new NightwatchTranslator;
+
+    $request = $translator->translate(nightwatchRequestTranslationRecord([
+        'queries' => -5,
+        'duration' => -1_000,
+        'peak_memory_usage' => -4_096,
+    ]))['data'];
+
+    expect($request['db_queries_count'])->toBe(0)
+        ->and($request['duration_ms'])->toBe(0)
+        ->and($request['memory_used_kb'])->toBe(0)
+        ->and($request['memory_peak_kb'])->toBe(0);
+
+    $huge = $translator->translate(nightwatchRequestTranslationRecord([
+        'queries' => 1e30,
+        'duration' => 1e30,
+        'peak_memory_usage' => 1e30,
+    ]))['data'];
+
+    expect($huge['db_queries_count'])->toBe(4_294_967_295)
+        ->and($huge['duration_ms'])->toBe(4_294_967_295)
+        ->and($huge['memory_used_kb'])->toBe(4_294_967_295);
+
+    $attempt = $translator->translate(['t' => 'job-attempt', 'attempt' => -2, 'duration' => -500])['data'];
+    $mail = $translator->translate(['t' => 'mail', 'to' => -1, 'cc' => -2, 'bcc' => 3, 'attachments' => -4, 'duration' => -500])['data'];
+    $notification = $translator->translate(['t' => 'notification', 'duration' => -500])['data'];
+    $outgoing = $translator->translate(['t' => 'outgoing-request', 'duration' => -500])['data'];
+    $cache = $translator->translate(['t' => 'cache-event', 'type' => 'hit', 'duration' => -500])['data'];
+
+    expect($attempt['attempts'])->toBe(0)
+        ->and($attempt['duration_ms'])->toBe(0)
+        ->and($mail['recipients_count'])->toBe(3)
+        ->and($mail['attachments_count'])->toBe(0)
+        ->and($mail['duration_ms'])->toBe(0)
+        ->and($notification['duration_ms'])->toBe(0)
+        ->and($outgoing['duration_ms'])->toBe(0)
+        ->and($cache['duration_ms'])->toBe(0);
+
+    expect($translator->translate(['t' => 'job-attempt', 'attempt' => 'abc'])['data']['attempts'])->toBe(1)
+        ->and($translator->translate(['t' => 'job-attempt'])['data']['attempts'])->toBe(1)
+        ->and($translator->translate(['t' => 'mail', 'to' => 4_294_967_295, 'cc' => 4_294_967_295])['data']['recipients_count'])->toBe(4_294_967_295);
+});
+
+it('maps cache write and delete failures to their operation with succeeded false', function (string $type, string $operation, bool $succeeded) {
+    $data = (new NightwatchTranslator)->translate(['t' => 'cache-event', 'type' => $type, 'key' => 'users:42'])['data'];
+
+    expect($data['operation'])->toBe($operation)
+        ->and($data['succeeded'])->toBe($succeeded);
+})->with([
+    'write' => ['write', 'write', true],
+    'write failure' => ['write-failure', 'write', false],
+    'delete' => ['delete', 'delete', true],
+    'delete failure' => ['delete-failure', 'delete', false],
+    'legacy write failed' => ['write-failed', 'write', false],
+    'legacy forget' => ['forget', 'delete', true],
+    'legacy forget failed' => ['forget-failed', 'delete', false],
+    'hit' => ['hit', 'hit', true],
+    'miss' => ['miss', 'miss', true],
+]);

@@ -13,7 +13,7 @@ function nightwatchMailRecord(array $overrides = []): array
         'v' => 1,
         't' => 'mail',
         'timestamp' => CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp() + 0.123456,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1',
         '_group' => md5('mail-group'),
         'trace_id' => '4d9a3c1e-0000-4000-8000-000000000001',
@@ -88,7 +88,7 @@ it('translates a notification record', function () {
     $event = (new NightwatchTranslator)->translate([
         't' => 'notification',
         'timestamp' => CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp() + 0.5,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         '_group' => md5('notification-group'),
         'trace_id' => 'trace-1',
         'execution_source' => 'job',
@@ -129,7 +129,7 @@ it('translates an outgoing request record', function () {
     $event = (new NightwatchTranslator)->translate([
         't' => 'outgoing-request',
         'timestamp' => CarbonImmutable::parse('2026-07-01 10:15:00', 'UTC')->getTimestamp() + 0.25,
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         '_group' => md5('http-group'),
         'trace_id' => 'trace-1',
         'execution_source' => 'command',

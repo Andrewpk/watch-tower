@@ -36,7 +36,7 @@ function nightwatchMailBatch(float $startedAt, string $traceId, bool $withReques
         'execution_preview' => 'POST /orders',
         'execution_stage' => 'action',
         'user' => '42',
-        'deploy' => 'production',
+        'deploy' => 'v1.4.2',
         'server' => 'web-1',
     ];
 
