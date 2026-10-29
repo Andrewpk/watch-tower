@@ -128,7 +128,6 @@ it('keeps the peak memory of the newest job attempt', function () {
 
 it('stores the scheduled task options and passes them to the detail page', function () {
     $this->withoutVite();
-    $hash = sha1('php artisan app:prune,0 * * * *,Europe/Amsterdam,30');
 
     postNightwatchRecords([[
         'v' => 1,
@@ -308,6 +307,71 @@ it('keeps the old trigger output for an exception stored without a source', func
             ->where('exception.occurrence_list.0.source_label', 'Example.php'));
 });
 
+it('labels a scheduled task exception with the file, because the agent sends no preview for a schedule', function () {
+    $this->withoutVite();
+
+    postNightwatchRecords([
+        execSourceException($this->at, ['execution_source' => 'schedule', 'execution_preview' => '']),
+    ], $this->token)->assertOk();
+
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]))
+        ->get(route('projects.exceptions.show', ['project' => $this->project->slug, 'exception' => ErrorGroup::sole()->id]))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('exception.occurrence_list.0.source_type', 'schedule')
+            ->where('exception.occurrence_list.0.source_label', 'Example.php'));
+});
+
+it('labels an exception of a request trace with an empty uri with the file', function () {
+    $traceId = (string) Str::uuid();
+
+    postNightwatchRecords([
+        execSourceRequest($this->at, $traceId, ['route_path' => '']),
+        execSourceException($this->at, ['trace_id' => $traceId]),
+    ], $this->token)->assertOk();
+
+    expect(ErrorOccurrence::sole()->load('trace')->triggeredBy())->toBe(['type' => 'GET', 'label' => 'Example.php']);
+});
+
+it('stores no peak memory for a skipped scheduled task', function () {
+    $record = fn (string $status) => [
+        'v' => 1,
+        't' => 'scheduled-task',
+        'timestamp' => $this->at->getTimestamp() + 0.5,
+        'trace_id' => (string) Str::uuid(),
+        'name' => 'php artisan app:prune',
+        'cron' => '0 * * * *',
+        'timezone' => 'UTC',
+        'repeat_seconds' => 0,
+        'status' => $status,
+        'duration' => 1_000_000,
+        'peak_memory_usage' => 2_097_152,
+    ];
+
+    postNightwatchRecords([$record('skipped'), $record('processed')], $this->token)->assertOk();
+
+    expect(ScheduledTaskRun::where('status', 'skipped')->sole()->memory_peak_kb)->toBeNull()
+        ->and(ScheduledTaskRun::where('status', 'processed')->sole()->memory_peak_kb)->toBe(2_048);
+});
+
+it('stores a scheduled task with an unrepresentable repeat interval', function () {
+    postNightwatchRecords([[
+        'v' => 1,
+        't' => 'scheduled-task',
+        'timestamp' => $this->at->getTimestamp() + 0.5,
+        'trace_id' => (string) Str::uuid(),
+        'name' => 'php artisan app:prune',
+        'cron' => '0 * * * *',
+        'timezone' => 'UTC',
+        'repeat_seconds' => 1e20,
+        'status' => 'processed',
+    ]], $this->token)->assertOk();
+
+    $run = ScheduledTaskRun::sole();
+
+    expect($run->repeat_seconds)->toBeNull()
+        ->and($run->task_hash)->toBe(sha1('php artisan app:prune,0 * * * *,UTC'));
+});
+
 it('names the trigger of an occurrence without a trace after its file', function () {
     $occurrence = ErrorOccurrence::factory()->make(['trace_id' => null, 'file' => 'app/Services/Example.php', 'source_type' => null, 'source_label' => null]);
 
@@ -364,11 +428,17 @@ it('seeds peak memory, task options and execution sources for the demo project',
     $call('seedCommands', [$this->project, $start]);
     $call('seedJobs', [$this->project, $start, []]);
     $call('seedScheduledTasks', [$this->project, $start, CarbonImmutable::now()]);
+    $call('seedCache', [$this->project, $start]);
+    $call('seedQueries', [$this->project, $traces]);
     $call('seedExceptions', [$this->project, $traces, $start, [User::factory()->create()], []]);
 
     expect(CommandRun::whereNull('memory_peak_kb')->exists())->toBeFalse()
         ->and(QueueJobRun::whereNotNull('memory_peak_kb')->exists())->toBeTrue()
         ->and(ScheduledTaskRun::where('timezone', 'UTC')->whereNotNull('without_overlapping')->exists())->toBeTrue()
+        ->and(TraceQuery::whereNull('source_type')->exists())->toBeFalse()
+        ->and(TraceQuery::where('source_label', 'GET /orders')->exists())->toBeTrue()
+        ->and(CacheEvent::whereNull('source_type')->exists())->toBeFalse()
         ->and(ErrorOccurrence::where('source_type', 'job')->exists())->toBeTrue()
+        ->and(ErrorOccurrence::where('source_type', 'command')->where('source_label', 'cache:warm')->exists())->toBeTrue()
         ->and(ErrorOccurrence::where('source_type', 'request')->exists())->toBeTrue();
 });

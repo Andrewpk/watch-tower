@@ -79,7 +79,8 @@ class ErrorOccurrence extends Model
      *
      * The stored execution source wins unless it is `request`: a queued job inherits the trace id of the request that
      * dispatched it, so the trace exists but names the wrong cause. Without a source the trace decides, and records
-     * from before the source was stored fall back to `COMMAND` and the basename of the file.
+     * from before the source was stored fall back to `COMMAND` and the basename of the file. A source without a label
+     * (a scheduled task sends no preview) takes the same file fallback as its label.
      *
      * @return array{type: string, label: string|null}
      */
@@ -88,11 +89,11 @@ class ErrorOccurrence extends Model
         $trace = $this->trace;
 
         if ($this->source_type !== null && $this->source_type !== 'request') {
-            return ['type' => $this->source_type, 'label' => $this->source_label];
+            return ['type' => $this->source_type, 'label' => $this->source_label ?? $this->fallbackLabel()];
         }
 
         if ($trace !== null && ! $trace->is_stub && $trace->method !== '') {
-            return ['type' => $trace->method, 'label' => $trace->uri !== '' ? $trace->uri : null];
+            return ['type' => $trace->method, 'label' => $trace->uri !== '' ? $trace->uri : $this->fallbackLabel()];
         }
 
         if ($this->source_type === 'request') {

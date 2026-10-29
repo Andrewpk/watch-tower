@@ -245,7 +245,10 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                                 <TableRow>
                                     <TableHead className="w-72">DATE</TableHead>
                                     <TableHead>STATUS</TableHead>
-                                    <TableHead className="w-32 text-right">
+                                    <TableHead
+                                        className="w-32 text-right"
+                                        title="Memory of the scheduler process. Command and exec tasks run in a child process, so their own memory isn't included."
+                                    >
                                         PEAK MEMORY
                                     </TableHead>
                                     <TableHead className="text-right">

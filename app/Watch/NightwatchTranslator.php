@@ -329,9 +329,9 @@ class NightwatchTranslator
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
                 'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
-                'memory_peak_kb' => $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
+                'memory_peak_kb' => $status === 'skipped' ? null : $this->bytesToKilobytes($r['peak_memory_usage'] ?? null),
                 'timezone' => $this->limit($r['timezone'] ?? null, 64),
-                'repeat_seconds' => $this->boundedInt($r['repeat_seconds'] ?? null, 65_535),
+                'repeat_seconds' => $this->repeatIntervalOrNull($r['repeat_seconds'] ?? null),
                 'without_overlapping' => $this->boolOrNull($r['without_overlapping'] ?? null),
                 'on_one_server' => $this->boolOrNull($r['on_one_server'] ?? null),
                 'run_in_background' => $this->boolOrNull($r['run_in_background'] ?? null),
@@ -384,9 +384,41 @@ class NightwatchTranslator
             $this->scalarString($r['cron'] ?? null),
             $this->scalarString($r['timezone'] ?? null),
         ]);
-        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+        $repeatSeconds = $this->repeatSeconds($r);
 
         return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
+    }
+
+    /**
+     * The repeat interval for the `unsignedSmallInteger` column: null when it is not numeric or falls outside
+     * 0..65535. The range is checked as a float first, because casting `1e20` or `INF` to int throws on PHP 8.5.
+     */
+    private function repeatIntervalOrNull(mixed $value): ?int
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $seconds = (float) $value;
+
+        return is_finite($seconds) && $seconds >= 0 && $seconds <= 65_535 ? (int) $seconds : null;
+    }
+
+    /**
+     * The sub-minute repeat interval as an int, 0 when absent. A numeric value that is not finite or does not fit an
+     * int (such as `1e20`) counts as 0: the cast would throw on PHP 8.5 and fail the whole batch.
+     *
+     * @param  array<string, mixed>  $r
+     */
+    private function repeatSeconds(array $r): int
+    {
+        $value = $r['repeat_seconds'] ?? 0;
+
+        if (is_numeric($value) && (! is_finite((float) $value) || abs((float) $value) >= 9.2e18)) {
+            return 0;
+        }
+
+        return (int) $value;
     }
 
     /**
@@ -407,7 +439,7 @@ class NightwatchTranslator
 
         try {
             $from = CarbonImmutable::createFromTimestamp((float) $timestamp);
-            $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+            $repeatSeconds = $this->repeatSeconds($r);
 
             if ($repeatSeconds > 0) {
                 $repeat = $from->addSeconds($repeatSeconds);

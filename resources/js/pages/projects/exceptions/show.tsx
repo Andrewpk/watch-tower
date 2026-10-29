@@ -768,15 +768,15 @@ function OccurrencesTable({ exception }: { exception: ExceptionDetail }) {
                                 <span className="font-mono text-[12px] text-muted-foreground">
                                     {formatAbsoluteShort(row.occurred_at)}
                                 </span>
-                                <span
-                                    className="flex min-w-0 items-center gap-2"
-                                    title={`Triggered by ${row.source_type}${row.source_label ? ` ${row.source_label}` : ''}`}
-                                >
-                                    <SourceBadge type={row.source_type} />
+                                <span className="flex min-w-0 items-center gap-2">
+                                    <SourceBadge
+                                        type={row.source_type}
+                                        title={`Triggered by ${row.source_type}${row.source_label ? ` ${row.source_label}` : ''}`}
+                                    />
                                     {row.source_label && (
                                         <span
                                             className="truncate font-mono text-[11px] text-muted-foreground"
-                                            title={row.source_label}
+                                            title={`Triggered by ${row.source_type} ${row.source_label}`}
                                         >
                                             {row.source_label}
                                         </span>
@@ -803,9 +803,12 @@ function OccurrencesTable({ exception }: { exception: ExceptionDetail }) {
     );
 }
 
-function SourceBadge({ type }: { type: string }) {
+function SourceBadge({ type, title }: { type: string; title?: string }) {
     return (
-        <span className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
+        <span
+            title={title}
+            className="inline-flex items-center rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wider text-muted-foreground uppercase"
+        >
             {type}
         </span>
     );

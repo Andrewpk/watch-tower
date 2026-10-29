@@ -283,6 +283,7 @@ class DemoDataSeeder extends Seeder
                 'file' => 'app/Services/CacheWarmer.php',
                 'line' => 64,
                 'is_handled' => false,
+                'command' => 'cache:warm',
                 'stacktrace' => [
                     ['file' => 'app/Services/CacheWarmer.php', 'line' => 64, 'function' => 'warm', 'class' => 'App\\Services\\CacheWarmer'],
                     ['file' => 'app/Console/Commands/WarmCache.php', 'line' => 22, 'function' => 'handle', 'class' => 'App\\Console\\Commands\\WarmCache'],
@@ -328,11 +329,12 @@ class DemoDataSeeder extends Seeder
                 $errorUser = $endUsers[array_rand($endUsers)];
             }
 
-            $source = isset($tpl['job'])
-                ? ['type' => 'job', 'label' => $tpl['job']]
-                : ($trace !== null
-                    ? ['type' => 'request', 'label' => $trace['method'].' '.$trace['uri']]
-                    : ['type' => null, 'label' => null]);
+            $source = match (true) {
+                isset($tpl['job']) => ['type' => 'job', 'label' => $tpl['job']],
+                isset($tpl['command']) => ['type' => 'command', 'label' => $tpl['command']],
+                $trace !== null => ['type' => 'request', 'label' => $trace['method'].' '.$trace['uri']],
+                default => ['type' => null, 'label' => null],
+            };
 
             $fingerprint = $fingerprinter->forException([
                 'class' => $tpl['class'],
@@ -1092,12 +1094,17 @@ class DemoDataSeeder extends Seeder
                         'created_at' => $occurredAt,
                         'updated_at' => $occurredAt,
                     ];
+
+                    if (count($rows) >= 500) {
+                        CacheEvent::query()->insert($rows);
+                        $rows = [];
+                    }
                 }
             }
         }
 
-        foreach (array_chunk($rows, 500) as $chunk) {
-            CacheEvent::query()->insert($chunk);
+        if ($rows !== []) {
+            CacheEvent::query()->insert($rows);
         }
     }
 

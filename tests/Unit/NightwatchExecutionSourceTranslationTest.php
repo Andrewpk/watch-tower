@@ -49,6 +49,23 @@ it('clamps a negative peak memory to zero', function (string $type) {
     expect(translateExecutionSource($type, ['peak_memory_usage' => -4_096])['memory_peak_kb'])->toBe(0);
 })->with(['command', 'job-attempt', 'scheduled-task']);
 
+it('stores no peak memory for a skipped scheduled task', function () {
+    expect(translateExecutionSource('scheduled-task', ['status' => 'skipped', 'peak_memory_usage' => 2_097_152])['memory_peak_kb'])->toBeNull()
+        ->and(translateExecutionSource('scheduled-task', ['status' => 'processed', 'peak_memory_usage' => 2_097_152])['memory_peak_kb'])->toBe(2_048);
+});
+
+it('translates a scheduled task whose repeat interval is not representable as an int', function (mixed $repeat) {
+    $data = translateExecutionSource('scheduled-task', ['repeat_seconds' => $repeat]);
+
+    expect($data['task_hash'])->toBe(sha1('php artisan app:prune,0 * * * *,UTC'))
+        ->and($data['repeat_seconds'])->toBeNull();
+})->with([1e20, INF, -INF, NAN, '1e20']);
+
+it('keeps the task hash of a normal repeat interval', function () {
+    expect(translateExecutionSource('scheduled-task', ['repeat_seconds' => 30])['task_hash'])->toBe(sha1('php artisan app:prune,0 * * * *,UTC,30'))
+        ->and(translateExecutionSource('scheduled-task', ['repeat_seconds' => '30'])['task_hash'])->toBe(sha1('php artisan app:prune,0 * * * *,UTC,30'));
+});
+
 it('maps the scheduled task options', function (int $seconds, ?int $expected) {
     $data = translateExecutionSource('scheduled-task', [
         'timezone' => 'Europe/Amsterdam',

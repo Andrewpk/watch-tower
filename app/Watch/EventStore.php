@@ -368,7 +368,8 @@ class EventStore
      * Persist one attempt of a job onto the job's run, which is keyed on (project, job id).
      *
      * The run holds the outcome of the newest attempt (by start time), so attempts arriving out of order or twice
-     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row.
+     * leave it unchanged. Without a `job_id` the attempt is stored as a standalone row. A newer attempt that reports
+     * no peak memory keeps the previous attempt's value.
      *
      * @param  array<string, mixed>  $data
      */
