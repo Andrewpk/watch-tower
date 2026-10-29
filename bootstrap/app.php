@@ -23,9 +23,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // Reads config('app.trusted_proxies') per request: .env is not loaded yet when this callback runs.
         $middleware->replace(FrameworkTrustProxies::class, TrustProxies::class);
 
+        // Capped at 10: the 6 fonts, the CSS, the app entry and the page chunk. An uncapped Link header grows
+        // to ~3 KB on heavy pages and, with the cookies, overflows nginx's default 4 KB proxy_buffer_size (502).
+        // The HTML still has a preload tag for every chunk, so only the early hints for the rest are lost.
         $middleware->web(append: [
             HandleInertiaRequests::class,
-            AddLinkHeadersForPreloadedAssets::class,
+            AddLinkHeadersForPreloadedAssets::using(10),
         ]);
 
         // Ingest throttling is keyed on the project resolved by these auth middleware.
