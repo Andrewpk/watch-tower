@@ -3,6 +3,7 @@
 namespace App\Watch;
 
 use Carbon\CarbonImmutable;
+use Cron\CronExpression;
 use Illuminate\Support\Str;
 
 /**
@@ -235,21 +236,166 @@ class NightwatchTranslator
     }
 
     /**
+     * Artisan command run, keyed on its trace id. A command is `completed` only for exit code 0; the raw argv is
+     * split into arguments and options on a best-effort basis, and the command output is not on the wire.
+     *
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array<string, mixed>}
      */
-    private function translateCommand(array $r): ?array
+    private function translateCommand(array $r): array
     {
-        return null;
+        $traceId = $this->scalarString($r['trace_id'] ?? null);
+        $name = $this->limit($r['name'] ?? null, 255);
+        $exitCode = $this->intOrNull($r['exit_code'] ?? null);
+        ['arguments' => $arguments, 'options' => $options] = $this->splitCommandLine($r['command'] ?? null, $name);
+
+        return [
+            'type' => 'command',
+            'id' => $traceId,
+            'data' => [
+                'request_id' => $this->stringOrNull($traceId),
+                'command' => $name,
+                'arguments' => $arguments,
+                'options' => $options,
+                'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
+                'exit_code' => $exitCode,
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
+    }
+
+    /**
+     * Scheduled task run, keyed on its trace id (every run gets a new one). The task is identified by a 40-character
+     * sha1 over its name, cron expression, timezone and repeat interval, which is what the task detail route accepts.
+     * A skipped run never executed, so it has no duration. Exit code and output are not on the wire.
+     *
+     * @param  array<string, mixed>  $r
+     * @return array{type: string, id: string, data: array<string, mixed>}
+     */
+    private function translateScheduledTask(array $r): array
+    {
+        $traceId = $this->scalarString($r['trace_id'] ?? null);
+        $status = $this->limit($r['status'] ?? null, 50) ?? 'processed';
+
+        return [
+            'type' => 'scheduled-task',
+            'id' => $traceId,
+            'data' => [
+                'request_id' => $this->stringOrNull($traceId),
+                'task' => $this->limit($r['name'] ?? null, 255),
+                'task_hash' => $this->scheduledTaskHash($r),
+                'schedule' => $this->limit($r['cron'] ?? null, 255),
+                'next_run_at' => $this->nextRunAt($r),
+                'status' => $status,
+                'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
+                'environment' => $this->limit($r['deploy'] ?? null, 50),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
+    }
+
+    /**
+     * Split a raw argv string (`app:sync-users --force 42`) into positional arguments and `-` prefixed options.
+     * The first non-option token equal to the command name is dropped, so a leading global option such as
+     * `--env=staging app:sync-users` still works. Both lists are null when empty.
+     *
+     * Upstream joins argv with spaces and loses quoting, so the value of `--opt value` lands in the arguments.
+     *
+     * @return array{arguments: list<string>|null, options: list<string>|null}
+     */
+    private function splitCommandLine(mixed $line, ?string $name): array
+    {
+        $tokens = is_string($line) ? preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY) : [];
+
+        $arguments = [];
+        $options = [];
+        $nameDropped = false;
+
+        foreach ($tokens ?: [] as $token) {
+            if (str_starts_with($token, '-')) {
+                $options[] = $token;
+            } elseif (! $nameDropped && $token === $name) {
+                $nameDropped = true;
+            } else {
+                $arguments[] = $token;
+            }
+        }
+
+        return [
+            'arguments' => $arguments === [] ? null : $arguments,
+            'options' => $options === [] ? null : $options,
+        ];
     }
 
     /**
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
      */
-    private function translateScheduledTask(array $r): ?array
+    private function scheduledTaskHash(array $r): string
     {
-        return null;
+        $key = implode(',', [
+            $this->scalarString($r['name'] ?? null),
+            $this->scalarString($r['cron'] ?? null),
+            $this->scalarString($r['timezone'] ?? null),
+        ]);
+        $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+
+        return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
+    }
+
+    /**
+     * The next time the task is due after this run, as a UTC ISO string; null when the cron expression or timezone
+     * cannot be evaluated. A sub-minute task (`repeat_seconds`) repeats only inside the minute its cron matched, so
+     * it is due again one interval later when that stays within the same minute, and otherwise at the next cron match.
+     *
+     * @param  array<string, mixed>  $r
+     */
+    private function nextRunAt(array $r): ?string
+    {
+        $timestamp = $r['timestamp'] ?? null;
+        $cron = $r['cron'] ?? null;
+
+        if (! is_numeric($timestamp) || ! is_string($cron) || $cron === '') {
+            return null;
+        }
+
+        try {
+            $from = CarbonImmutable::createFromTimestamp((float) $timestamp);
+            $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
+
+            if ($repeatSeconds > 0) {
+                $repeat = $from->addSeconds($repeatSeconds);
+
+                if ($repeat->startOfMinute()->equalTo($from->startOfMinute())) {
+                    return $repeat->utc()->toIso8601String();
+                }
+            }
+
+            $timezone = is_string($r['timezone'] ?? null) && $r['timezone'] !== '' ? $r['timezone'] : null;
+
+            return CarbonImmutable::instance((new CronExpression($cron))->getNextRunDate($from, 0, false, $timezone))
+                ->utc()
+                ->toIso8601String();
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * Microseconds to milliseconds, clamped to the unsigned 32-bit range of the `duration_ms` columns (a
+     * long-running daemon command would otherwise overflow them on MySQL).
+     */
+    private function unsignedDurationMs(mixed $value): ?int
+    {
+        $millis = $this->microsToMillis($value);
+
+        return $millis === null ? null : max(0, min($millis, 4_294_967_295));
+    }
+
+    private function scalarString(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
     }
 
     /**

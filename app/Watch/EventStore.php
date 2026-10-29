@@ -3,6 +3,7 @@
 namespace App\Watch;
 
 use App\Models\CacheEvent;
+use App\Models\CommandRun;
 use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\EventOccurrence;
@@ -12,6 +13,7 @@ use App\Models\NotificationSend;
 use App\Models\OutgoingRequest;
 use App\Models\Project;
 use App\Models\QueueJobRun;
+use App\Models\ScheduledTaskRun;
 use App\Models\Trace;
 use App\Models\TraceQuery;
 use Carbon\CarbonImmutable;
@@ -400,14 +402,53 @@ class EventStore
     }
 
     /**
+     * Persist a command run. Command runs have no trace to link to, so the record is a plain insert.
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeCommand(Project $project, array $data): void {}
+    private function storeCommand(Project $project, array $data): void
+    {
+        CommandRun::create([
+            'project_id' => $project->id,
+            'command' => $this->stringOrNull($data['command'] ?? null) ?? 'unknown',
+            'arguments' => is_array($data['arguments'] ?? null) ? $data['arguments'] : null,
+            'options' => is_array($data['options'] ?? null) ? $data['options'] : null,
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'completed',
+            'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'output' => $this->stringOrNull($data['output'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
+     * Persist a scheduled task run as a plain insert. Runs are grouped by `task_hash`, which falls back to the sha1
+     * of the task name unless the event carries a 40 character hex hash (the only shape the detail route accepts).
+     *
      * @param  array<string, mixed>  $data
      */
-    private function storeScheduledTask(Project $project, array $data): void {}
+    private function storeScheduledTask(Project $project, array $data): void
+    {
+        $task = $this->stringOrNull($data['task'] ?? null) ?? 'unknown';
+        $suppliedHash = $this->stringOrNull($data['task_hash'] ?? null);
+
+        ScheduledTaskRun::create([
+            'project_id' => $project->id,
+            'task' => $task,
+            'task_hash' => $suppliedHash !== null && preg_match('/^[0-9a-f]{40}$/i', $suppliedHash) ? $suppliedHash : sha1($task),
+            'schedule' => $this->stringOrNull($data['schedule'] ?? null),
+            'schedule_summary' => $this->stringOrNull($data['schedule_summary'] ?? null),
+            'next_run_at' => $this->parseTimestamp($data['next_run_at'] ?? null, allowNull: true),
+            'status' => $this->stringOrNull($data['status'] ?? null) ?? 'processed',
+            'exit_code' => $this->intOrNull($data['exit_code'] ?? null),
+            'duration_ms' => $this->intOrNull($data['duration_ms'] ?? null),
+            'threshold_ms' => $this->intOrNull($data['threshold_ms'] ?? null),
+            'output' => $this->stringOrNull($data['output'] ?? null),
+            'environment' => $this->stringOrNull($data['environment'] ?? null),
+            'occurred_at' => $this->parseTimestamp($data['occurred_at'] ?? null),
+        ]);
+    }
 
     /**
      * Persist a sent mail against its trace, which is created as a stub if the request record has not arrived yet.
