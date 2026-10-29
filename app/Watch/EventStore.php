@@ -299,18 +299,19 @@ class EventStore
 
     /**
      * Persist a scheduled task run as a plain insert. Runs are grouped by `task_hash`, which falls back to the sha1
-     * of the task name for events that do not carry one.
+     * of the task name unless the event carries a 40 character hex hash (the only shape the detail route accepts).
      *
      * @param  array<string, mixed>  $data
      */
     private function storeScheduledTask(Project $project, array $data): void
     {
         $task = $this->stringOrNull($data['task'] ?? null) ?? 'unknown';
+        $suppliedHash = $this->stringOrNull($data['task_hash'] ?? null);
 
         ScheduledTaskRun::create([
             'project_id' => $project->id,
             'task' => $task,
-            'task_hash' => $this->stringOrNull($data['task_hash'] ?? null) ?? sha1($task),
+            'task_hash' => $suppliedHash !== null && preg_match('/^[0-9a-f]{40}$/i', $suppliedHash) ? $suppliedHash : sha1($task),
             'schedule' => $this->stringOrNull($data['schedule'] ?? null),
             'schedule_summary' => $this->stringOrNull($data['schedule_summary'] ?? null),
             'next_run_at' => $this->parseTimestamp($data['next_run_at'] ?? null, allowNull: true),

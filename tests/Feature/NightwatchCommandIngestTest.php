@@ -3,11 +3,13 @@
 use App\Models\CommandRun;
 use App\Models\Project;
 use App\Models\ScheduledTaskRun;
+use App\Models\User;
 use App\Watch\Stats\CommandStats;
 use App\Watch\Stats\ScheduledTaskStats;
 use App\Watch\Stats\TimeRange;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
+use Inertia\Testing\AssertableInertia;
 
 beforeEach(function () {
     $this->project = Project::factory()->create();
@@ -112,4 +114,57 @@ it('does not touch another project when storing runs', function () {
 
     expect(CommandRun::where('project_id', $other->id)->count())->toBe(0)
         ->and(ScheduledTaskRun::where('project_id', $other->id)->count())->toBe(0);
+});
+
+it('renders the command detail page for an ingested command', function () {
+    $this->withoutVite();
+    postNightwatchRecords([commandIngestRecord([], $this->now)], ingestToken($this->project->id))->assertOk();
+
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]))
+        ->get(route('projects.commands.show', [$this->project, 'app:sync-users']))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('projects/commands/show')
+            ->where('detail.command', 'app:sync-users')
+            ->where('detail.totals.total', 1)
+            ->where('detail.calls.0.exit_code', 0)
+            ->where('detail.calls.0.duration_ms', 1250));
+});
+
+it('renders the scheduled task detail page for an ingested task', function () {
+    $this->withoutVite();
+    postNightwatchRecords([scheduledTaskIngestRecord([], $this->now)], ingestToken($this->project->id))->assertOk();
+
+    $hash = sha1('php artisan app:prune,0 * * * *,UTC');
+
+    $this->actingAs(User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]))
+        ->get(route('projects.scheduled-tasks.show', [$this->project, $hash]))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('projects/scheduled-tasks/show')
+            ->where('detail.task', 'php artisan app:prune')
+            ->where('detail.task_hash', $hash)
+            ->where('detail.schedule', '0 * * * *')
+            ->where('detail.totals.processed', 1)
+            ->where('detail.runs.0.duration_ms', 2000));
+});
+
+it('replaces a malformed legacy task hash with the sha1 of the task', function () {
+    Project::factory()->withApiKey('pk_test_task_hash')->create();
+    $validHash = str_repeat('AbC123', 6).'abcd';
+
+    $this->withHeader('Authorization', 'Bearer pk_test_task_hash')
+        ->postJson('/api/ingest/sync', [
+            'events' => [
+                ['type' => 'scheduled-task', 'data' => ['task' => 'backup:run', 'task_hash' => 'not-a-valid-hash', 'status' => 'processed']],
+                ['type' => 'scheduled-task', 'data' => ['task' => 'backup:valid', 'task_hash' => $validHash, 'status' => 'processed']],
+                ['type' => 'scheduled-task', 'data' => ['task' => 'backup:none', 'status' => 'processed']],
+            ],
+        ])
+        ->assertOk()
+        ->assertJson(['events_stored' => 3]);
+
+    expect(ScheduledTaskRun::where('task', 'backup:run')->value('task_hash'))->toBe(sha1('backup:run'))
+        ->and(ScheduledTaskRun::where('task', 'backup:valid')->value('task_hash'))->toBe($validHash)
+        ->and(ScheduledTaskRun::where('task', 'backup:none')->value('task_hash'))->toBe(sha1('backup:none'));
 });

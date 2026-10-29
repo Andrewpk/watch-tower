@@ -80,10 +80,23 @@ it('leaves arguments and options null for a bare command', function () {
         ->and($data['options'])->toBeNull();
 });
 
-it('keeps the first token when it is not the command name', function () {
-    $data = translateCommandWireRecord(commandWireRecord(['name' => 'app:sync-users', 'command' => 'artisan app:sync-users']))['data'];
+it('drops the command name after a leading global option', function () {
+    $data = translateCommandWireRecord(commandWireRecord(['command' => '--env=staging app:sync-users --force 42']))['data'];
 
-    expect($data['arguments'])->toBe(['artisan', 'app:sync-users']);
+    expect($data['arguments'])->toBe(['42'])
+        ->and($data['options'])->toBe(['--env=staging', '--force']);
+});
+
+it('only drops the command name once', function () {
+    $data = translateCommandWireRecord(commandWireRecord(['command' => 'app:sync-users app:sync-users']))['data'];
+
+    expect($data['arguments'])->toBe(['app:sync-users']);
+});
+
+it('clamps a command duration to the unsigned integer column range', function () {
+    $data = translateCommandWireRecord(commandWireRecord(['duration' => 9_000_000_000_000_000]))['data'];
+
+    expect($data['duration_ms'])->toBe(4_294_967_295);
 });
 
 it('truncates a long command name to the column length', function () {
@@ -155,10 +168,44 @@ it('computes the next run in the task timezone and returns it in UTC', function 
         ->and(translateCommandWireRecord($afterTwo)['data']['next_run_at'])->toBe('2026-07-02T06:00:00+00:00');
 });
 
-it('schedules a sub-minute task one interval after the run', function () {
+it('schedules a sub-minute task one interval after the run while it stays inside the minute', function () {
     $data = translateCommandWireRecord(scheduledTaskWireRecord(['cron' => '* * * * *', 'repeat_seconds' => 10]))['data'];
 
     expect($data['next_run_at'])->toBe('2026-07-01T10:15:10+00:00');
+});
+
+it('follows the cron once a sub-minute task would leave the minute', function () {
+    // everyTenSeconds()->weekdays(): the last run of Friday is 23:59:50, so the next one is Monday.
+    $weekdays = scheduledTaskWireRecord([
+        'cron' => '* * * * 1-5',
+        'repeat_seconds' => 10,
+        'timestamp' => CarbonImmutable::parse('2026-07-03 23:59:50', 'UTC')->getTimestamp(),
+    ]);
+    // everyThirtySeconds()->hourly(): the second run of the hour is 10:00:30, so the next one is 11:00.
+    $hourly = scheduledTaskWireRecord([
+        'cron' => '0 * * * *',
+        'repeat_seconds' => 30,
+        'timestamp' => CarbonImmutable::parse('2026-07-01 10:00:30', 'UTC')->getTimestamp(),
+    ]);
+
+    expect(CarbonImmutable::parse('2026-07-03', 'UTC')->dayOfWeekIso)->toBe(5)
+        ->and(translateCommandWireRecord($weekdays)['data']['next_run_at'])->toBe('2026-07-06T00:00:00+00:00')
+        ->and(translateCommandWireRecord($hourly)['data']['next_run_at'])->toBe('2026-07-01T11:00:00+00:00');
+});
+
+it('clamps a scheduled task duration to the unsigned integer column range', function () {
+    $data = translateCommandWireRecord(scheduledTaskWireRecord(['duration' => 9_000_000_000_000_000]))['data'];
+
+    expect($data['duration_ms'])->toBe(4_294_967_295);
+});
+
+it('does not fail on non-scalar identity fields', function () {
+    $data = translateCommandWireRecord(scheduledTaskWireRecord(['name' => ['nested'], 'cron' => ['x'], 'timezone' => ['y']]))['data'];
+
+    expect($data['task_hash'])->toBe(sha1(',,'))
+        ->and($data['task'])->toBeNull()
+        ->and($data['schedule'])->toBeNull()
+        ->and($data['next_run_at'])->toBeNull();
 });
 
 it('leaves next_run_at null for an invalid cron expression or timezone', function () {

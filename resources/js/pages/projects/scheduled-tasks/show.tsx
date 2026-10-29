@@ -138,9 +138,9 @@ export default function ScheduledTasksShow({ detail, selectedRange }: Props) {
                         </div>
                         <div className="flex items-center gap-3 font-mono">
                             <span>{detail.task}</span>
-                            {detail.schedule_summary ? (
+                            {(detail.schedule_summary ?? detail.schedule) ? (
                                 <span className="rounded-md border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                                    {detail.schedule_summary}
+                                    {detail.schedule_summary ?? detail.schedule}
                                 </span>
                             ) : null}
                         </div>

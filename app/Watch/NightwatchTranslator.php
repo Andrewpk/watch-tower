@@ -198,7 +198,7 @@ class NightwatchTranslator
      */
     private function translateCommand(array $r): array
     {
-        $traceId = (string) ($r['trace_id'] ?? '');
+        $traceId = $this->scalarString($r['trace_id'] ?? null);
         $name = $this->limit($r['name'] ?? null, 255);
         $exitCode = $this->intOrNull($r['exit_code'] ?? null);
         ['arguments' => $arguments, 'options' => $options] = $this->splitCommandLine($r['command'] ?? null, $name);
@@ -213,7 +213,7 @@ class NightwatchTranslator
                 'options' => $options,
                 'status' => $exitCode === null || $exitCode === 0 ? 'completed' : 'failed',
                 'exit_code' => $exitCode,
-                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $this->unsignedDurationMs($r['duration'] ?? null),
                 'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -230,7 +230,7 @@ class NightwatchTranslator
      */
     private function translateScheduledTask(array $r): array
     {
-        $traceId = (string) ($r['trace_id'] ?? '');
+        $traceId = $this->scalarString($r['trace_id'] ?? null);
         $status = $this->limit($r['status'] ?? null, 50) ?? 'processed';
 
         return [
@@ -243,7 +243,7 @@ class NightwatchTranslator
                 'schedule' => $this->limit($r['cron'] ?? null, 255),
                 'next_run_at' => $this->nextRunAt($r),
                 'status' => $status,
-                'duration_ms' => $status === 'skipped' ? null : $this->microsToMillis($r['duration'] ?? null),
+                'duration_ms' => $status === 'skipped' ? null : $this->unsignedDurationMs($r['duration'] ?? null),
                 'environment' => $this->limit($r['deploy'] ?? null, 50),
                 'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
             ],
@@ -252,7 +252,10 @@ class NightwatchTranslator
 
     /**
      * Split a raw argv string (`app:sync-users --force 42`) into positional arguments and `-` prefixed options.
-     * The leading command name is dropped. Both lists are null when empty.
+     * The first non-option token equal to the command name is dropped, so a leading global option such as
+     * `--env=staging app:sync-users` still works. Both lists are null when empty.
+     *
+     * Upstream joins argv with spaces and loses quoting, so the value of `--opt value` lands in the arguments.
      *
      * @return array{arguments: list<string>|null, options: list<string>|null}
      */
@@ -260,16 +263,15 @@ class NightwatchTranslator
     {
         $tokens = is_string($line) ? preg_split('/\s+/', trim($line), -1, PREG_SPLIT_NO_EMPTY) : [];
 
-        if ($tokens !== [] && $tokens !== false && $tokens[0] === $name) {
-            array_shift($tokens);
-        }
-
         $arguments = [];
         $options = [];
+        $nameDropped = false;
 
         foreach ($tokens ?: [] as $token) {
             if (str_starts_with($token, '-')) {
                 $options[] = $token;
+            } elseif (! $nameDropped && $token === $name) {
+                $nameDropped = true;
             } else {
                 $arguments[] = $token;
             }
@@ -286,7 +288,11 @@ class NightwatchTranslator
      */
     private function scheduledTaskHash(array $r): string
     {
-        $key = implode(',', [(string) ($r['name'] ?? ''), (string) ($r['cron'] ?? ''), (string) ($r['timezone'] ?? '')]);
+        $key = implode(',', [
+            $this->scalarString($r['name'] ?? null),
+            $this->scalarString($r['cron'] ?? null),
+            $this->scalarString($r['timezone'] ?? null),
+        ]);
         $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
 
         return sha1($repeatSeconds > 0 ? $key.','.$repeatSeconds : $key);
@@ -294,7 +300,8 @@ class NightwatchTranslator
 
     /**
      * The next time the task is due after this run, as a UTC ISO string; null when the cron expression or timezone
-     * cannot be evaluated. Sub-minute tasks (`repeat_seconds`) are due again one interval after this run.
+     * cannot be evaluated. A sub-minute task (`repeat_seconds`) repeats only inside the minute its cron matched, so
+     * it is due again one interval later when that stays within the same minute, and otherwise at the next cron match.
      *
      * @param  array<string, mixed>  $r
      */
@@ -312,7 +319,11 @@ class NightwatchTranslator
             $repeatSeconds = (int) ($r['repeat_seconds'] ?? 0);
 
             if ($repeatSeconds > 0) {
-                return $from->addSeconds($repeatSeconds)->utc()->toIso8601String();
+                $repeat = $from->addSeconds($repeatSeconds);
+
+                if ($repeat->startOfMinute()->equalTo($from->startOfMinute())) {
+                    return $repeat->utc()->toIso8601String();
+                }
             }
 
             $timezone = is_string($r['timezone'] ?? null) && $r['timezone'] !== '' ? $r['timezone'] : null;
@@ -323,6 +334,22 @@ class NightwatchTranslator
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Microseconds to milliseconds, clamped to the unsigned 32-bit range of the `duration_ms` columns (a
+     * long-running daemon command would otherwise overflow them on MySQL).
+     */
+    private function unsignedDurationMs(mixed $value): ?int
+    {
+        $millis = $this->microsToMillis($value);
+
+        return $millis === null ? null : max(0, min($millis, 4_294_967_295));
+    }
+
+    private function scalarString(mixed $value): string
+    {
+        return is_scalar($value) ? (string) $value : '';
     }
 
     /**
