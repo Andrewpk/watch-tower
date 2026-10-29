@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\Project;
+use App\Watch\MaintenanceStatus;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
@@ -46,6 +47,9 @@ class HandleInertiaRequests extends Middleware
                 'environment' => $currentProject->organization?->plan ?? 'production',
                 'open_issues_count' => $currentProject->errorGroups()->where('status', 'unresolved')->count(),
             ] : null,
+            'maintenanceProblems' => fn (): array => $user?->isSuperAdmin()
+                ? app(MaintenanceStatus::class)->problems()
+                : [],
             'projects' => function () use ($user) {
                 if (! $user) {
                     return [];

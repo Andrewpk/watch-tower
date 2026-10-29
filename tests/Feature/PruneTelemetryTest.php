@@ -3,6 +3,7 @@
 use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\IssueComment;
+use App\Models\MaintenanceRun;
 use App\Models\Project;
 use App\Watch\TelemetryPruner;
 use Illuminate\Support\Facades\DB;
@@ -177,4 +178,49 @@ it('removes old traces together with their queries and events', function () {
     expect(DB::table('traces')->count())->toBe(0)
         ->and(DB::table('trace_queries')->count())->toBe(0)
         ->and(DB::table('event_occurrences')->count())->toBe(0);
+});
+
+it('records when a full run finished and how many rows it deleted', function () {
+    $project = Project::factory()->create(['retention_days' => 30]);
+
+    seedTelemetry($project, now()->subDays(40));
+
+    $this->artisan('watch:prune')->assertSuccessful();
+
+    $run = MaintenanceRun::query()->findOrFail(MaintenanceRun::TASK_PRUNE);
+
+    expect($run->finished_at->equalTo(now()))->toBeTrue()
+        ->and($run->rows_deleted)->toBe(14);
+});
+
+it('records a run when there are no projects', function () {
+    $this->artisan('watch:prune')->assertSuccessful();
+
+    expect(MaintenanceRun::query()->findOrFail(MaintenanceRun::TASK_PRUNE)->rows_deleted)->toBe(0);
+});
+
+it('updates the same record on every run', function () {
+    $project = Project::factory()->create(['retention_days' => 30]);
+
+    seedTelemetry($project, now()->subDays(40));
+    $this->artisan('watch:prune')->assertSuccessful();
+
+    $this->travelTo('2026-06-16 12:00:00');
+    $this->artisan('watch:prune')->assertSuccessful();
+
+    $run = MaintenanceRun::query()->sole();
+
+    expect($run->finished_at->toDateTimeString())->toBe('2026-06-16 12:00:00')
+        ->and($run->rows_deleted)->toBe(0);
+});
+
+it('does not record a dry run, a single-project run or a failed run', function () {
+    $project = Project::factory()->create();
+
+    $this->artisan('watch:prune', ['--dry-run' => true])->assertSuccessful();
+    $this->artisan('watch:prune', ['--project' => $project->slug])->assertSuccessful();
+    $this->artisan('watch:prune', ['--project' => 'nope'])->assertFailed();
+    $this->artisan('watch:prune', ['--chunk' => 0])->assertFailed();
+
+    expect(MaintenanceRun::query()->count())->toBe(0);
 });

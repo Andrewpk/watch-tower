@@ -16,7 +16,8 @@ import ProjectAdminController from '@/actions/App/Http/Controllers/Settings/Proj
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SettingsShell } from '@/layouts/settings-shell';
-import type { NewApiKey, SharedProps } from '@/types/inertia';
+import { formatRelativeTime } from '@/lib/utils';
+import type { LastPrune, NewApiKey, SharedProps } from '@/types/inertia';
 
 type Project = {
     id: string;
@@ -35,6 +36,7 @@ type Project = {
 
 type Props = {
     projects: Project[];
+    lastPrune: LastPrune | null;
 };
 
 const GRACE_OPTIONS = [
@@ -56,7 +58,7 @@ function formatDateTime(iso: string) {
     return new Date(iso).toLocaleString();
 }
 
-export default function ProjectsIndex({ projects }: Props) {
+export default function ProjectsIndex({ projects, lastPrune }: Props) {
     const { props, flash } = usePage<
         SharedProps & { flash?: { success?: string } }
     >();
@@ -80,6 +82,15 @@ export default function ProjectsIndex({ projects }: Props) {
                     </h1>
                     <p className="text-sm text-muted-foreground">
                         Create projects and assign admin access.
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                        {lastPrune
+                            ? `Retention last applied ${formatRelativeTime(lastPrune.finished_at)}${
+                                  lastPrune.rows_deleted === null
+                                      ? ''
+                                      : ` (${new Intl.NumberFormat().format(lastPrune.rows_deleted)} rows deleted)`
+                              }.`
+                            : 'Retention has never been applied.'}
                     </p>
                 </div>
                 <Button asChild size="sm">

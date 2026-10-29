@@ -28,4 +28,25 @@ return [
         'agent_auth_per_minute' => (int) env('WATCH_INGEST_AGENT_AUTH_PER_MINUTE', 30),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Maintenance Warnings
+    |--------------------------------------------------------------------------
+    |
+    | Thresholds for the warnings super admins see when background work is not
+    | running (see App\Watch\MaintenanceStatus).
+    |
+    | prune_overdue_hours:   Hours after which a retention prune that has not
+    |                        finished counts as overdue. The prune is daily.
+    | queue_stalled_minutes: Minutes a queued job may wait, unclaimed, before
+    |                        the queue counts as stalled. Only checked for the
+    |                        `database` queue driver.
+    |
+    */
+
+    'maintenance' => [
+        'prune_overdue_hours' => (int) env('WATCH_PRUNE_OVERDUE_HOURS', 25),
+        'queue_stalled_minutes' => (int) env('WATCH_QUEUE_STALLED_MINUTES', 10),
+    ],
+
 ];
