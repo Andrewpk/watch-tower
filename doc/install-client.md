@@ -2,6 +2,8 @@
 
 This guide covers installing the client integration in a Laravel application using `laravel/nightwatch`.
 
+New to Watch Tower? Step 4 of the [quick start](quick-start.md) covers the same setup with checks after each step.
+
 Official docs: https://nightwatch.laravel.com/docs/start-guide
 
 ## 1. Install Nightwatch

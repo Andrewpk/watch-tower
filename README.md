@@ -34,26 +34,30 @@ Watch Tower ingests events from one or more client Laravel applications and grou
 
 ---
 
-## Installation
+## Quick start
 
-There are two pieces to install — the Watch Tower server, and the Nightwatch client inside each app you want to monitor.
-
-- **[Install Watch Tower (server)](doc/install.md)** — full setup guide: requirements, environment, database, dev server, scripts, testing, and troubleshooting.
-- **[Install the client app integration](doc/install-client.md)** — wire up `laravel/nightwatch` in your client Laravel app and point it at your Watch Tower instance.
-- **[Run with Docker](doc/docker.md)** — pull the release image from GHCR. It runs the web server, queue worker, and scheduler by default.
-
-### Quick start
+**[Follow the quick start](doc/quick-start.md)**: run Watch Tower with Docker and see your first request in about 10 minutes.
 
 ```bash
-git clone https://github.com/Andrewpk/watch-tower.git
-cd watch-tower
-composer run setup
-composer run dev
+mkdir watch-tower && cd watch-tower
+echo "APP_KEY=base64:$(openssl rand -base64 32)" > watch-tower.env
+echo "APP_URL=http://localhost:8080" >> watch-tower.env
+echo "AUTORUN_ENABLED=true" >> watch-tower.env
+
+docker run -d --name watch-tower --restart unless-stopped \
+  --platform linux/amd64 -p 8080:8080 --stop-timeout 90 \
+  --env-file watch-tower.env \
+  -v watch-tower-storage:/var/www/html/storage \
+  ghcr.io/andrewpk/watch-tower:latest
 ```
 
-Then open **http://localhost:8000**.
+Then follow the guide to create your login and connect your app.
 
-For anything that fails or needs explanation, see [doc/install.md](doc/install.md).
+## Other ways to install
+
+- **[Docker reference](doc/docker.md)**: every setting, reverse proxies, separate worker and scheduler containers.
+- **[Manual install](doc/manual-install.md)**: run from source with PHP, Composer and Node. Use this to develop Watch Tower.
+- **[Client app integration](doc/install-client.md)**: connect `laravel/nightwatch` in each app you want to monitor.
 
 ---
 
