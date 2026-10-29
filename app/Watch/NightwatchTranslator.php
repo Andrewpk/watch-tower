@@ -207,30 +207,111 @@ class NightwatchTranslator
     }
 
     /**
+     * `to`, `cc`, `bcc` and `attachments` are counts on the wire, not lists. The sensor never reports a failed
+     * send, so the status is only ever `failed` if a future agent starts setting the flag.
+     *
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array<string, mixed>}
      */
-    private function translateMail(array $r): ?array
+    private function translateMail(array $r): array
     {
-        return null;
+        return [
+            'type' => 'mail',
+            'id' => (string) ($r['_group'] ?? ''),
+            'data' => [
+                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'class' => $this->limit($r['class'] ?? null, 255) ?? 'UnknownMailable',
+                'mailer' => $this->limit($r['mailer'] ?? null, 50),
+                'subject' => $this->limit($r['subject'] ?? null, 255),
+                'recipients_count' => (int) ($r['to'] ?? 0) + (int) ($r['cc'] ?? 0) + (int) ($r['bcc'] ?? 0),
+                'attachments_count' => (int) ($r['attachments'] ?? 0),
+                'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
+                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                ...$this->sourceFields($r),
+                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
     }
 
     /**
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array<string, mixed>}
      */
-    private function translateNotification(array $r): ?array
+    private function translateNotification(array $r): array
     {
-        return null;
+        return [
+            'type' => 'notification',
+            'id' => (string) ($r['_group'] ?? ''),
+            'data' => [
+                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'class' => $this->limit($r['class'] ?? null, 255) ?? 'UnknownNotification',
+                'channel' => $this->limit($r['channel'] ?? null, 50) ?? 'unknown',
+                'status' => ($r['failed'] ?? false) ? 'failed' : 'sent',
+                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                ...$this->sourceFields($r),
+                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
     }
 
     /**
+     * The wire `timestamp` is the start of the request, which is what `occurred_at` records.
+     *
      * @param  array<string, mixed>  $r
-     * @return array{type: string, id: string, data: array<string, mixed>}|null
+     * @return array{type: string, id: string, data: array<string, mixed>}
      */
-    private function translateOutgoingRequest(array $r): ?array
+    private function translateOutgoingRequest(array $r): array
     {
-        return null;
+        return [
+            'type' => 'outgoing-request',
+            'id' => (string) ($r['_group'] ?? ''),
+            'data' => [
+                'request_id' => $this->stringOrNull($r['trace_id'] ?? null),
+                'method' => strtoupper($this->limit($r['method'] ?? null, 10) ?? 'GET'),
+                'host' => $this->limit($r['host'] ?? null, 255) ?? '',
+                'url' => $this->limit($r['url'] ?? null, 2048) ?? '',
+                'status_code' => $this->boundedInt($r['status_code'] ?? null, 65535),
+                'duration_ms' => $this->microsToMillis($r['duration'] ?? null),
+                'request_size_bytes' => $this->boundedInt($r['request_size'] ?? null, 4294967295),
+                'response_size_bytes' => $this->boundedInt($r['response_size'] ?? null, 4294967295),
+                ...$this->sourceFields($r),
+                'environment' => $this->stringOrNull($r['deploy'] ?? null),
+                'occurred_at' => $this->timestampToIso($r['timestamp'] ?? null),
+            ],
+        ];
+    }
+
+    /**
+     * The execution context (what ran when the record was captured) shared by mail, notification and outgoing
+     * request records, cut to the `source_*` column lengths.
+     *
+     * @param  array<string, mixed>  $r
+     * @return array{source_type: string|null, source_id: string|null, source_label: string|null}
+     */
+    private function sourceFields(array $r): array
+    {
+        return [
+            'source_type' => $this->limit($r['execution_source'] ?? null, 50),
+            'source_id' => $this->limit($r['execution_id'] ?? null, 255),
+            'source_label' => $this->limit($r['execution_preview'] ?? null, 255),
+        ];
+    }
+
+    /**
+     * An integer for an unsigned column: null when the value is not numeric or falls outside 0..$max, which
+     * would otherwise fail the insert under MySQL strict mode.
+     */
+    private function boundedInt(mixed $value, int $max): ?int
+    {
+        if (! is_numeric($value)) {
+            return null;
+        }
+
+        $int = (int) $value;
+
+        return $int >= 0 && $int <= $max ? $int : null;
     }
 
     /**
