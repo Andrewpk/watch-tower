@@ -9,8 +9,8 @@ use App\Jobs\DeleteProjectData;
 |
 | CI does not build the image, so these tests read the Dockerfile and the
 | files it embeds as heredocs, and check the parts that other code depends on:
-| what supervisord runs, how it stops, and that the stop window fits the
-| longest queued job.
+| what supervisord runs, how it stops, that the stop window fits the longest
+| queued job, and which SQLite files the entrypoint creates.
 |
 */
 
@@ -220,3 +220,62 @@ it('logs but does not stop the container when the queue worker or scheduler give
         ->and($result['errors'])->toContain("supervisord gave up on a program ({$payload}). The container keeps running.")
         ->not->toContain('TERMED');
 })->with(['queue-worker', 'scheduler']);
+
+/**
+ * Run the storage script with the given environment and return the SQLite files it created under the temp root.
+ *
+ * @param  array<string, string>  $environment
+ * @return list<string>
+ */
+function runStorageScript(array $environment): array
+{
+    $root = sys_get_temp_dir().'/storage-'.bin2hex(random_bytes(4));
+    mkdir($root);
+    $script = "{$root}/40-watch-tower-storage.sh";
+    file_put_contents($script, dockerfileHeredoc('/etc/entrypoint.d/40-watch-tower-storage.sh')."\n");
+
+    $environment = array_map(fn (string $value) => str_replace('{root}', $root, $value), $environment);
+    $process = proc_open(['sh', $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $root, ['APP_BASE_DIR' => $root, 'PATH' => getenv('PATH')] + $environment);
+    $errors = stream_get_contents($pipes[2]);
+    expect(proc_close($process))->toBe(0, $errors);
+
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
+    foreach ($iterator as $file) {
+        if (str_ends_with($file->getFilename(), '.sqlite')) {
+            $files[] = str_replace($root, '{root}', $file->getPathname());
+        }
+    }
+    sort($files);
+
+    exec('rm -rf '.escapeshellarg($root));
+
+    return $files;
+}
+
+it('creates the app, telemetry and logs SQLite files next to DB_DATABASE', function () {
+    expect(runStorageScript(['DB_DATABASE' => '{root}/storage/database/database.sqlite']))->toBe([
+        '{root}/storage/database/database.sqlite',
+        '{root}/storage/database/logs.sqlite',
+        '{root}/storage/database/telemetry.sqlite',
+    ]);
+});
+
+it('creates the telemetry and logs SQLite files where their settings point', function () {
+    expect(runStorageScript([
+        'DB_DATABASE' => '{root}/storage/database/database.sqlite',
+        'DB_TELEMETRY_DATABASE' => '{root}/telemetry/t.sqlite',
+        'DB_LOGS_DATABASE' => '{root}/logs/l.sqlite',
+    ]))->toBe([
+        '{root}/logs/l.sqlite',
+        '{root}/storage/database/database.sqlite',
+        '{root}/telemetry/t.sqlite',
+    ]);
+});
+
+it('creates no SQLite files for MySQL', function () {
+    expect(runStorageScript([
+        'DB_CONNECTION' => 'mysql',
+        'DB_DATABASE' => 'watch_tower',
+    ]))->toBe([]);
+});
