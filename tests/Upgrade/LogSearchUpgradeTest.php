@@ -2,6 +2,7 @@
 
 use App\Models\LogEntry;
 use App\Watch\Databases;
+use App\Watch\DiskSpace;
 use Illuminate\Support\Facades\DB;
 use Tests\Upgrade\Support\SplitUpgrade;
 
@@ -79,4 +80,51 @@ it('can be rolled back and applied again without losing searchability', function
     checkUpgradedFullTextIntegrity();
 
     expect(LogEntry::query()->searchMessage('ayment')->count())->toBe(12);
+});
+
+it('stops before creating anything when there is too little disk space for the index', function () {
+    $this->upgrade->legacy()->seed(25);
+    $asked = [];
+
+    app()->instance(DiskSpace::class, new DiskSpace(function (string $directory) use (&$asked): int {
+        $asked[] = $directory;
+
+        return 1024;
+    }));
+
+    $this->upgrade->useSmallChunks(freeDiskSpace: fn (): int => PHP_INT_MAX);
+
+    expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'Not enough free disk space');
+
+    $logs = DB::connection(Databases::LOGS);
+
+    expect($asked)->toBe([dirname(realpath($this->upgrade->path('logs')))])
+        ->and($logs->table('sqlite_master')->where('name', 'like', 'log_entries_fts%')->count())->toBe(0)
+        ->and($logs->table('sqlite_master')->where('type', 'trigger')->count())->toBe(0)
+        ->and($logs->table('log_entries')->count())->toBe(25)
+        ->and(DB::table('migrations')->where('migration', 'like', '%add_full_text_index%')->count())->toBe(0);
+
+    app()->forgetInstance(DiskSpace::class);
+
+    expect($this->upgrade->migrate())->toBe(0)
+        ->and(LogEntry::query()->searchMessage('ayment', true)->count())->toBe(25);
+});
+
+it('asks for about one and a half times the size of the logs file', function () {
+    $this->upgrade->legacy()->seed(25);
+    $this->upgrade->migrate();
+    $logs = DB::connection(Databases::LOGS);
+    $migration = require database_path('migrations/2026_10_30_171523_add_full_text_index_to_log_entries.php');
+    $migration->down();
+    $logs->statement('PRAGMA wal_checkpoint(TRUNCATE)');
+    $size = filesize($this->upgrade->path('logs'));
+
+    app()->instance(DiskSpace::class, new DiskSpace(fn (): int => (int) ($size * 1.4)));
+
+    expect(fn () => $migration->up())->toThrow(RuntimeException::class, 'Not enough free disk space');
+
+    app()->instance(DiskSpace::class, new DiskSpace(fn (): int => (int) ($size * 1.6)));
+    $migration->up();
+
+    expect($logs->table('sqlite_master')->where('name', 'log_entries_fts')->count())->toBe(1);
 });

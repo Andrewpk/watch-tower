@@ -1,10 +1,12 @@
 <?php
 
 use App\Watch\Databases;
+use App\Watch\DiskSpace;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Number;
 
 return new class extends Migration
 {
@@ -34,6 +36,9 @@ return new class extends Migration
      * FULLTEXT index that uses the ngram parser, which indexes runs of characters instead of whole words. MariaDB has
      * no ngram parser, so it gets no index and keeps searching with LIKE.
      *
+     * On SQLite the index adds about 1.4 times the size of the messages to the logs file, so the migration checks
+     * the free disk space first and stops before changing anything if it is short.
+     *
      * Any later migration that alters `log_entries` on SQLite must recreate these triggers, see CONTRIBUTING.md.
      */
     public function up(): void
@@ -61,8 +66,37 @@ return new class extends Migration
         };
     }
 
+    /**
+     * The index takes roughly 1.4 times the size of the messages. The whole file is used as the base because that
+     * is cheap to measure, and the margin covers the write-ahead log.
+     */
+    private function assertEnoughDiskSpaceForSqliteIndex(Connection $connection): void
+    {
+        $exists = $connection->selectOne("select count(*) as total from sqlite_master where name = '".self::FTS_TABLE."'")->total > 0;
+        $path = Databases::sqlitePath(Databases::LOGS);
+
+        if ($exists || $path === null) {
+            return;
+        }
+
+        $needed = (int) ceil(((int) (@filesize($path) ?: 0) + (int) (@filesize($path.'-wal') ?: 0)) * 1.5);
+        $directory = dirname($path);
+        $free = app(DiskSpace::class)->freeIn($directory);
+
+        if ($free !== false && $free < $needed) {
+            throw new RuntimeException(sprintf(
+                'Not enough free disk space in %s to index the log messages: it needs about %s and only %s is free. Nothing was changed. Free up space or point the [logs] database at a bigger disk, then run the migrations again.',
+                $directory,
+                Number::fileSize($needed),
+                Number::fileSize((int) $free),
+            ));
+        }
+    }
+
     private function createSqliteIndex(Connection $connection): void
     {
+        $this->assertEnoughDiskSpaceForSqliteIndex($connection);
+
         try {
             $connection->statement(
                 'CREATE VIRTUAL TABLE IF NOT EXISTS '.self::FTS_TABLE

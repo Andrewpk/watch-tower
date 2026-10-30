@@ -38,9 +38,9 @@ function logEntry(Project $project, string $message, array $attributes = []): Lo
  *
  * @return list<string>
  */
-function searchMessages(string $term): array
+function searchMessages(string $term, ?bool $useIndex = true): array
 {
-    return LogEntry::query()->searchMessage($term)->orderBy('seq')->pluck('message')->all();
+    return LogEntry::query()->searchMessage($term, $useIndex)->orderBy('seq')->pluck('message')->all();
 }
 
 function checkFullTextIntegrity(): void
@@ -136,8 +136,8 @@ describe('searching on SQLite', function () {
 
     it('uses the full-text index instead of scanning the messages', function () {
         $plan = collect(DB::connection(Databases::LOGS)->select(
-            'explain query plan '.LogEntry::query()->searchMessage('payment')->toSql(),
-            LogEntry::query()->searchMessage('payment')->getBindings(),
+            'explain query plan '.LogEntry::query()->searchMessage('payment', true)->toSql(),
+            LogEntry::query()->searchMessage('payment', true)->getBindings(),
         ))->pluck('detail')->implode("\n");
 
         expect($plan)->toContain('log_entries_fts VIRTUAL TABLE INDEX')
@@ -145,16 +145,125 @@ describe('searching on SQLite', function () {
     });
 
     it('does not use the full-text index for short terms', function () {
-        expect(LogEntry::query()->searchMessage('ab')->toSql())->not->toContain('log_entries_fts')
-            ->and(LogEntry::query()->searchMessage('abc')->toSql())->toContain('log_entries_fts');
+        expect(LogEntry::query()->searchMessage('ab', true)->toSql())->not->toContain('log_entries_fts')
+            ->and(LogEntry::query()->searchMessage('abc', true)->toSql())->toContain('log_entries_fts');
     });
 
     it('can be chained with other conditions and keeps the table qualified', function () {
         logEntry($this->project, 'Payment failed', ['level' => 'error']);
         logEntry($this->project, 'Payment ok');
 
-        expect(LogEntry::query()->where('level', 'error')->searchMessage('payment')->pluck('message')->all())->toBe(['Payment failed'])
-            ->and(LogEntry::query()->searchMessage('payment')->orWhere('level', 'debug')->count())->toBe(2);
+        expect(LogEntry::query()->where('level', 'error')->searchMessage('payment', true)->pluck('message')->all())->toBe(['Payment failed'])
+            ->and(LogEntry::query()->searchMessage('payment', true)->orWhere('level', 'debug')->count())->toBe(2);
+    });
+
+    it('returns the same entries from both paths', function () {
+        $messages = [
+            'Payment failed for order 12', 'payment ACCEPTED', 'GET /api/users?page=2 took 40ms', 'disk 100% full', 'user_id missing',
+            'say "hello" twice', 'a AND b', 'NEAR(x y) here', 'foo-bar*baz', 'c:\\temp file', 'it\'s 50% done_ok!', 'Unrelated line', 'aaa aaa aaaa',
+        ];
+
+        foreach ($messages as $message) {
+            logEntry($this->project, $message);
+        }
+
+        $terms = ['payment', 'PAYMENT', 'ayment fail', 'order 1', '/api/users', 'page=2', '100%', '0% f', '_id', 'user_id', '"hello"', 'AND', 'a AND b', 'NEAR(', 'bar*', 'foo-', 'c:\\t', "'s 50%", 'done_ok!', 'aaa', 'aaaa', 'nothing like this', 'ab', '%', '_', '!'];
+
+        foreach ($terms as $term) {
+            $viaIndex = LogEntry::query()->searchMessage($term, true)->orderBy('seq')->pluck('seq')->all();
+            $viaLike = LogEntry::query()->searchMessage($term, false)->orderBy('seq')->pluck('seq')->all();
+
+            expect($viaLike)->toBe($viaIndex, "term [{$term}]");
+        }
+    });
+});
+
+describe('choosing between the index and LIKE', function () {
+    beforeEach(function () {
+        foreach (['insert', 'delete', 'update'] as $event) {
+            DB::connection(Databases::LOGS)->statement("drop trigger log_entries_fts_{$event}");
+        }
+    });
+
+    /**
+     * Insert `$count` plain entries with one statement.
+     *
+     * The full-text triggers are dropped by the `beforeEach` above, because indexing a hundred thousand rows would
+     * make these tests slow, and they only look at which SQL a search runs.
+     */
+    function bulkLogEntries(Project $project, int $count, string $level = 'info', string $message = 'Filler line'): void
+    {
+        DB::connection(Databases::LOGS)->insert(
+            'with recursive numbers(n) as (select 1 union all select n + 1 from numbers where n < ?) '
+            ."insert into log_entries(id, project_id, level, message, occurred_at) select lower(hex(randomblob(16))), ?, ?, ? || ' ' || n, ? from numbers",
+            [$count, $project->id, $level, $message, now()->subMinutes(5)->toDateTimeString()],
+        );
+    }
+
+    /**
+     * Whether a search for `$term` over the page's filters ran through the FTS index, judged from the SQL it executed.
+     */
+    function searchRanThroughTheIndex(Project $project, string $term, ?string $level = null): bool
+    {
+        $logs = DB::connection(Databases::LOGS);
+        $logs->flushQueryLog();
+        $logs->enableQueryLog();
+
+        app(LogStats::class)->paginated($project, TimeRange::fromLabel('24h'), $term, $level, null, 1, 50);
+
+        $usedIndex = collect($logs->getQueryLog())->contains(fn (array $entry): bool => str_contains($entry['query'], 'log_entries_fts'));
+        $logs->disableQueryLog();
+
+        return $usedIndex;
+    }
+
+    it('scans with LIKE up to the threshold and uses the index above it', function () {
+        bulkLogEntries($this->project, LogEntry::SEARCH_INDEX_MINIMUM_CANDIDATES, message: 'Payment filler');
+
+        expect(searchRanThroughTheIndex($this->project, 'payment'))->toBeFalse();
+
+        bulkLogEntries($this->project, 1, message: 'Payment one more');
+
+        expect(searchRanThroughTheIndex($this->project, 'payment'))->toBeTrue()
+            ->and(searchRanThroughTheIndex($this->project, 'pa'))->toBeFalse();
+    });
+
+    it('counts only the rows the other filters leave', function () {
+        bulkLogEntries($this->project, LogEntry::SEARCH_INDEX_MINIMUM_CANDIDATES + 1, message: 'Payment filler');
+        bulkLogEntries($this->project, 3, level: 'error', message: 'Payment error');
+        bulkLogEntries(Project::factory()->create(), 5, message: 'Payment elsewhere');
+
+        expect(searchRanThroughTheIndex($this->project, 'payment'))->toBeTrue()
+            ->and(searchRanThroughTheIndex($this->project, 'payment', level: 'error'))->toBeFalse();
+
+        $page = app(LogStats::class)->paginated($this->project, TimeRange::fromLabel('24h'), 'payment error', 'error', null, 1, 50);
+
+        expect($page->total())->toBe(3);
+    });
+
+    it('decides with a count that stops one row past the threshold', function () {
+        bulkLogEntries($this->project, LogEntry::SEARCH_INDEX_MINIMUM_CANDIDATES + 5);
+
+        $logs = DB::connection(Databases::LOGS);
+        $logs->enableQueryLog();
+
+        LogEntry::query()->where('project_id', $this->project->id)->searchMessage('filler');
+
+        $decision = collect($logs->getQueryLog())->pluck('query')->sole();
+
+        expect($decision)->toContain('from (select 1 from "log_entries"')
+            ->and($decision)->toContain('limit '.(LogEntry::SEARCH_INDEX_MINIMUM_CANDIDATES + 1));
+    });
+
+    it('never runs a decision count for short terms or a forced path', function () {
+        $logs = DB::connection(Databases::LOGS);
+        $logs->enableQueryLog();
+
+        LogEntry::query()->searchMessage('ab');
+        LogEntry::query()->searchMessage('abc', true);
+        LogEntry::query()->searchMessage('abc', false);
+
+        expect($logs->getQueryLog())->toBe([]);
     });
 });
 
@@ -317,7 +426,7 @@ describe('searching on MySQL', function () {
 
     function mysqlSearch(string $term): Builder
     {
-        return LogEntry::on('mysql_search')->searchMessage($term);
+        return LogEntry::on('mysql_search')->searchMessage($term, true);
     }
 
     it('matches against the FULLTEXT index in boolean mode with a quoted phrase, then confirms with LIKE', function () {
@@ -347,6 +456,6 @@ describe('searching on MySQL', function () {
     it('keeps using LIKE on MariaDB, which has no ngram parser', function () {
         config(['database.connections.mariadb_search' => [...config('database.connections.mysql_search'), 'driver' => 'mariadb']]);
 
-        expect(LogEntry::on('mariadb_search')->searchMessage('payment')->toSql())->not->toContain('match');
+        expect(LogEntry::on('mariadb_search')->searchMessage('payment', true)->toSql())->not->toContain('match');
     });
 });
