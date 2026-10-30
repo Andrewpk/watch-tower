@@ -28,7 +28,7 @@ Nothing secret is baked into the image. Pass settings with `-e` or `--env-file`.
 | --- | --- |
 | `APP_KEY` | **Required.** Generate one with `echo "base64:$(openssl rand -base64 32)"`. Keep it stable between restarts. |
 | `APP_URL` | **Required.** The public URL, for example `https://watch.example.com`. |
-| `DB_*` | Defaults to SQLite at `/var/www/html/storage/database/database.sqlite`. For MySQL 8 set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`. PostgreSQL is not supported yet ([#19](https://github.com/Andrewpk/watch-tower/issues/19)). |
+| `DB_*` | Defaults to SQLite: three files in `/var/www/html/storage/database/`. See [Databases](#databases). For MySQL 8 set `DB_CONNECTION=mysql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`. PostgreSQL is not supported yet ([#19](https://github.com/Andrewpk/watch-tower/issues/19)). |
 | `TRUSTED_PROXIES` | Off by default. Set it when a reverse proxy or load balancer terminates TLS in front of the container. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 | `AUTORUN_ENABLED` | Defaults to `false`. Set `true` on the web container to run migrations and cache config, routes, views and events on every start. |
 | `RUN_QUEUE_WORKER` | Defaults to `true`. Set `false` to not start the queue worker in this container. Must be `true` or `false`. Ignored when you override the container command. |
@@ -39,9 +39,49 @@ The image sets `APP_ENV=production`, `APP_DEBUG=false`, `LOG_CHANNEL=stderr` (re
 
 ## Persistent data
 
-Mount one volume at **`/var/www/html/storage`**. It holds the SQLite database (`storage/database/`), uploaded avatars and the framework cache. Do not mount over `/var/www/html/database`: that directory contains the migrations.
+Mount one volume at **`/var/www/html/storage`**. It holds the SQLite databases (`storage/database/`), uploaded avatars and the framework cache. Do not mount over `/var/www/html/database`: that directory contains the migrations.
 
-A named volume works as is. For a bind mount, the directory must be writable by UID 33 (`www-data`), for example `chown 33:33 ./storage`. Missing subdirectories and the SQLite file are created on start.
+A named volume works as is. For a bind mount, the directory must be writable by UID 33 (`www-data`), for example `chown 33:33 ./storage`. Missing subdirectories and the SQLite files are created on start.
+
+## Databases
+
+On SQLite, Watch Tower keeps its data in three files, so that ingest and retention don't hold up logins:
+
+| File | Holds | Setting |
+| --- | --- | --- |
+| `database.sqlite` | users, projects, sessions, cache and the queue | `DB_DATABASE` |
+| `telemetry.sqlite` | requests, queries, jobs, exceptions, issues and everything else the agent sends | `DB_TELEMETRY_DATABASE` |
+| `logs.sqlite` | log entries and their search index | `DB_LOGS_DATABASE` |
+
+`telemetry.sqlite` and `logs.sqlite` sit next to `DB_DATABASE` unless you set their paths. Each file also has `-wal` and `-shm` files next to it while the app runs.
+
+On MySQL everything stays in one database by default. To put telemetry or logs in another database or on another server, set `DB_TELEMETRY_HOST`, `DB_TELEMETRY_PORT`, `DB_TELEMETRY_DATABASE`, `DB_TELEMETRY_USERNAME` or `DB_TELEMETRY_PASSWORD` (and the same with `DB_LOGS_`). Anything you leave out is taken from the `DB_*` values. If you use `DB_URL`, set `DB_TELEMETRY_URL` and `DB_LOGS_URL` too. Set these before you upgrade: the upgrade moves the data on its first run.
+
+### Backups
+
+Back up the three files together. The simplest consistent backup:
+
+1. `docker stop watch-tower`
+2. Copy the whole `storage/database/` directory, including the `-wal` and `-shm` files.
+3. `docker start watch-tower`
+
+Restore all three files from the same backup.
+
+### Upgrading from a single database
+
+The first start of this version moves telemetry and logs out of `database.sqlite` into the two new files, then builds the log search index. It copies the data, checks the row counts, and only then drops the old tables, so a crash or restart part way through is safe: the next run starts the move again.
+
+- **Disk space.** The move needs free space about the size of your current `database.sqlite`. It checks first and stops with an error, before moving anything, if there isn't enough.
+- **Time.** Seconds for a small database, minutes for several GB. The web server starts after the migrations finish.
+- **Large databases.** On a platform that replaces containers that fail a health check (Docker Swarm, for example), a long move can be cut off and restarted. Run it once before you switch over, with the new image and your usual environment and volume:
+
+  ```bash
+  docker run --rm --env-file watch-tower.env \
+    -v watch-tower-storage:/var/www/html/storage \
+    ghcr.io/andrewpk/watch-tower:<new-version> php artisan migrate --force
+  ```
+
+  Stop the old containers first, so nothing writes to the database during the move.
 
 ## Run
 
@@ -138,4 +178,4 @@ docker exec watch-tower php artisan watch:prune --dry-run
 
 - Example proxy configurations, SQLite tuning and a Compose stack are tracked in [#19](https://github.com/Andrewpk/watch-tower/issues/19). See [Behind a reverse proxy](#behind-a-reverse-proxy) for the trusted proxy settings.
 - Build it yourself with `docker build -t watch-tower .`. The PHP image is pinned by digest in the `Dockerfile`; override it with `--build-arg PHP_IMAGE=serversideup/php:<tag>`.
-- SQLite runs in WAL mode with a 5 second busy timeout (`DB_JOURNAL_MODE`, `DB_BUSY_TIMEOUT`).
+- All three SQLite files run in WAL mode with a 5 second busy timeout (`DB_JOURNAL_MODE`, `DB_BUSY_TIMEOUT`).

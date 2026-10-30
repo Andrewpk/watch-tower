@@ -17,7 +17,7 @@ Make sure the following are installed on your machine before starting.
 | Node.js | **20.x or 22.x LTS** | https://nodejs.org |
 | npm | **10+** | bundled with Node |
 | Git | latest | |
-| SQLite | 3.35+ | default database driver |
+| SQLite | 3.35+, with FTS5 | default database driver; FTS5 powers log search and is included in most builds |
 | (optional) MySQL | 8.0+ | only if you switch `DB_CONNECTION=mysql` |
 | (optional) Redis | 7+ | only if you switch cache/queue/session to redis |
 
@@ -102,6 +102,8 @@ Then run migrations:
 php artisan migrate
 ```
 
+Migrations also create `database/telemetry.sqlite` and `database/logs.sqlite`. Telemetry and logs live in their own files so that ingest doesn't hold up logins. Set `DB_TELEMETRY_DATABASE` or `DB_LOGS_DATABASE` to put them somewhere else. See [Databases](docker.md#databases) for backups and for upgrading an install that has everything in one file.
+
 > Want MySQL instead? Set the following in `.env`, create the database manually, then run `php artisan migrate`:
 >
 > ```env
@@ -112,6 +114,8 @@ php artisan migrate
 > DB_USERNAME=root
 > DB_PASSWORD=
 > ```
+>
+> Telemetry and logs use the same MySQL database unless you set `DB_TELEMETRY_*` or `DB_LOGS_*` (see `.env.example`).
 
 ### 4.6 (Optional) Seed Demo Data
 

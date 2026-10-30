@@ -54,6 +54,18 @@ php artisan test --compact --filter=SomeFeatureTest   # run a subset
 
 Bug fixes should include a test that fails without the fix.
 
+## Database migrations
+
+Watch Tower uses three database connections: the default one for users, projects, sessions, cache and the queue, `telemetry` for everything ingest writes, and `logs` for `log_entries`. `App\Watch\Databases` lists which table lives where.
+
+A migration that changes a telemetry or log table must:
+
+- set `protected $connection = Databases::TELEMETRY;` (or `Databases::LOGS`);
+- add no foreign key to `users`, `projects` or `organizations`, which live in another database;
+- on SQLite, recreate the log search triggers after changing `log_entries`, because rebuilding the table drops them.
+
+`tests/Unit/CrossDatabaseRulesTest.php` checks the first two.
+
 ## Branches and commits
 
 Branch from `main` and name the branch `<type>/<issue-number>-<short-slug>`, for example `fix/11-test-suite` or `feat/35-release-image`.
