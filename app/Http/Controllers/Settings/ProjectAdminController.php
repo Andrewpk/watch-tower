@@ -13,7 +13,6 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -204,7 +203,7 @@ class ProjectAdminController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($project) {
+        $project->getConnection()->transaction(function () use ($project) {
             $project->admins()->detach();
             $project->forceFill(['deleting_at' => now()])->save();
         });
