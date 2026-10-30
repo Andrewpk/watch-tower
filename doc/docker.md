@@ -55,6 +55,8 @@ On SQLite, Watch Tower keeps its data in three files, so that ingest and retenti
 
 `telemetry.sqlite` and `logs.sqlite` sit next to `DB_DATABASE` unless you set their paths. Each file also has `-wal` and `-shm` files next to it while the app runs.
 
+The log search index makes `logs.sqlite` about 2.5 times the size of the log entries alone. To keep it small, send fewer logs: set `NIGHTWATCH_LOG_LEVEL=warning` in your apps.
+
 On MySQL everything stays in one database by default. To put telemetry or logs in another database or on another server, set `DB_TELEMETRY_HOST`, `DB_TELEMETRY_PORT`, `DB_TELEMETRY_DATABASE`, `DB_TELEMETRY_USERNAME` or `DB_TELEMETRY_PASSWORD` (and the same with `DB_LOGS_`). Anything you leave out is taken from the `DB_*` values. If you use `DB_URL`, set `DB_TELEMETRY_URL` and `DB_LOGS_URL` too. Set these before you upgrade: the upgrade moves the data on its first run.
 
 ### Backups
@@ -71,7 +73,7 @@ Restore all three files from the same backup.
 
 The first start of this version moves telemetry and logs out of `database.sqlite` into the two new files, then builds the log search index. It copies the data, checks the row counts, and only then drops the old tables, so a crash or restart part way through is safe: the next run starts the move again.
 
-- **Disk space.** The move needs free space about the size of your current `database.sqlite`. It checks first and stops with an error, before moving anything, if there isn't enough.
+- **Disk space.** The move needs free space about the size of your current `database.sqlite`, plus about 1.5 times the size of your logs for the search index. Both steps check first and stop with an error, before changing anything, if there isn't enough.
 - **Time.** Seconds for a small database, minutes for several GB. The web server starts after the migrations finish.
 - **Large databases.** On a platform that replaces containers that fail a health check (Docker Swarm, for example), a long move can be cut off and restarted. Run it once before you switch over, with the new image and your usual environment and volume:
 
