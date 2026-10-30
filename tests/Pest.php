@@ -4,7 +4,9 @@ use App\Models\ErrorGroup;
 use App\Models\ErrorOccurrence;
 use App\Models\Project;
 use App\Models\Trace;
+use App\Watch\Databases;
 use Carbon\CarbonInterface;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
@@ -109,8 +111,16 @@ function postNightwatchBody(string $body, string $token, bool $gzip = true): Tes
 }
 
 /**
+ * A query builder for a table on the connection that owns it (app, telemetry or logs).
+ */
+function dbTable(string $table): Builder
+{
+    return DB::connection(Databases::connectionFor($table))->table($table);
+}
+
+/**
  * Insert one telemetry row stamped at `$at` into every per-project telemetry table
- * (14 rows), with the query and event rows attached to the trace.
+ * (14 rows, across the telemetry and logs databases), with the query and event rows attached to the trace.
  */
 function seedTelemetry(Project $project, CarbonInterface $at): void
 {
@@ -139,10 +149,10 @@ function seedTelemetry(Project $project, CarbonInterface $at): void
     ];
 
     foreach ($rows as $table => $row) {
-        DB::table($table)->insert([...$base, 'id' => (string) Str::uuid(), ...$row]);
+        dbTable($table)->insert([...$base, 'id' => (string) Str::uuid(), ...$row]);
     }
 
-    DB::table('metrics')->insert([
+    dbTable('metrics')->insert([
         'project_id' => $project->id,
         'period_start' => $at,
         'period_end' => $at,

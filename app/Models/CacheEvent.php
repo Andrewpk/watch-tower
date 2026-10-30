@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -22,6 +23,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class CacheEvent extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     use HasUuids;
 
     protected function casts(): array

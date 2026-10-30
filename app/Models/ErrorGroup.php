@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\ErrorGroupFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -37,6 +38,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class ErrorGroup extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<ErrorGroupFactory> */
     use HasFactory, HasUuids;
 

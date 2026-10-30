@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\UsesAppDatabase;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -16,11 +17,25 @@ use Illuminate\Notifications\Notifiable;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasFactory, Notifiable, UsesAppDatabase;
 
     public const ROLE_SUPER_ADMIN = 'super_admin';
 
     public const ROLE_ADMIN = 'admin';
+
+    /**
+     * Clear the references to a deleted user that live in the telemetry database.
+     *
+     * Issues and comments sit in another database, so no foreign key can null these columns when the user goes.
+     */
+    protected static function booted(): void
+    {
+        static::deleted(function (User $user): void {
+            ErrorGroup::query()->where('resolved_by_user_id', $user->getKey())->toBase()->update(['resolved_by_user_id' => null]);
+            ErrorGroup::query()->where('assigned_to_user_id', $user->getKey())->toBase()->update(['assigned_to_user_id' => null]);
+            IssueComment::query()->where('user_id', $user->getKey())->toBase()->update(['user_id' => null]);
+        });
+    }
 
     protected function casts(): array
     {

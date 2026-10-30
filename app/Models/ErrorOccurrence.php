@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\ErrorOccurrenceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -35,6 +36,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class ErrorOccurrence extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<ErrorOccurrenceFactory> */
     use HasFactory, HasUuids;
 

@@ -7,6 +7,7 @@ use App\Models\Project;
 use App\Models\QueueJobRun;
 use App\Models\Trace;
 use App\Models\TraceQuery;
+use App\Watch\Databases;
 use App\Watch\EventStore;
 use App\Watch\Fingerprinter;
 use App\Watch\Stats\DashboardStats;
@@ -231,7 +232,7 @@ it('returns the existing stub when a concurrent job creates it between the looku
 
         $competitorInserted = true;
 
-        DB::table('traces')->insert([
+        dbTable('traces')->insert([
             'id' => $competitorId,
             'project_id' => $this->project->id,
             'correlation_id' => $correlationId,
@@ -255,7 +256,7 @@ it('returns the existing stub when a concurrent job creates it between the looku
 });
 
 it('scopes the trace unique index to the project', function () {
-    $uniqueColumns = collect(Schema::getIndexes('traces'))
+    $uniqueColumns = collect(Schema::connection(Databases::TELEMETRY)->getIndexes('traces'))
         ->filter(fn (array $index): bool => $index['unique'] && ! $index['primary'])
         ->map(fn (array $index): array => $index['columns'])
         ->values()

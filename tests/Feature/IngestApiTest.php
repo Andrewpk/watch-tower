@@ -4,6 +4,7 @@ use App\Jobs\ProcessWatchEvent;
 use App\Models\CacheEvent;
 use App\Models\LogEntry;
 use App\Models\Project;
+use App\Watch\Databases;
 use App\Watch\EventStore;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
@@ -83,7 +84,7 @@ it('synchronously stores events on the sync endpoint', function () {
         'method' => 'POST',
         'uri' => '/api/login',
         'status_code' => 200,
-    ]);
+    ], Databases::TELEMETRY);
 });
 
 it('rate limits the legacy ingest endpoints per project', function () {
@@ -138,12 +139,12 @@ it('stores log and cache-event records from the legacy sync endpoint', function 
         'project_id' => $project->id,
         'level' => 'warning',
         'message' => 'Disk almost full',
-    ]);
+    ], Databases::LOGS);
     $this->assertDatabaseHas('cache_events', [
         'project_id' => $project->id,
         'key' => 'users:1',
         'operation' => 'hit',
-    ]);
+    ], Databases::TELEMETRY);
     expect(LogEntry::count())->toBe(1)->and(CacheEvent::count())->toBe(1);
 });
 

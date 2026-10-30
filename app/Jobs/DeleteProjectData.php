@@ -16,7 +16,9 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
  *
  * Telemetry is deleted in chunks by {@see TelemetryPruner::purge()}, so no single
  * statement locks a large project's tables, and only then is the project row
- * removed. Every step is idempotent, so a retry after a failure simply
+ * removed. Telemetry lives in other databases and no foreign key ties it to the
+ * project, so one more purge runs right after the row is gone to catch rows
+ * written by ingest that was still in flight. Every step is idempotent, so a retry after a failure simply
  * continues where the previous attempt stopped.
  *
  * On a real queue each run is time-boxed to {@see self::RUN_BUDGET_SECONDS}. A
@@ -107,6 +109,12 @@ class DeleteProjectData implements ShouldQueue
         }
 
         $project->delete();
+
+        /*
+         * No foreign key links telemetry to the project any more, so ingest that was already in flight when the
+         * project was hidden can have written rows after the purge above. One more pass narrows that window.
+         */
+        $pruner->purge($project->id);
     }
 
     /**

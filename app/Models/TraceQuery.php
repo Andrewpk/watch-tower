@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\TraceQueryFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -30,6 +31,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class TraceQuery extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<TraceQueryFactory> */
     use HasFactory, HasUuids;
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\DeleteProjectData;
 use App\Models\EndUser;
 use App\Models\ErrorOccurrence;
 use App\Models\Project;
@@ -249,9 +250,11 @@ it('is cleaned up with the project', function () {
 
     expect(EndUser::count())->toBe(1);
 
-    $this->project->delete();
+    $this->project->forceFill(['deleting_at' => now()])->save();
+    DeleteProjectData::dispatchSync($this->project->id);
 
-    expect(EndUser::count())->toBe(0);
+    expect(EndUser::count())->toBe(0)
+        ->and(Project::withoutGlobalScope('notDeleting')->find($this->project->id))->toBeNull();
 });
 
 it('does not backfill again when a user record arrives for an existing end user', function () {

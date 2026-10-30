@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\UsesAppDatabase;
 use Carbon\CarbonInterface;
 use Database\Factories\MaintenanceRunFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -21,7 +22,7 @@ use Illuminate\Database\Eloquent\Model;
 class MaintenanceRun extends Model
 {
     /** @use HasFactory<MaintenanceRunFactory> */
-    use HasFactory;
+    use HasFactory, UsesAppDatabase;
 
     /**
      * The retention prune, `php artisan watch:prune`.

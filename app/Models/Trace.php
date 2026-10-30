@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\TraceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
@@ -56,6 +57,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 ])]
 class Trace extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<TraceFactory> */
     use HasFactory, HasUuids;
 
