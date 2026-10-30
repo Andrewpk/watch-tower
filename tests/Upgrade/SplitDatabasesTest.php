@@ -43,7 +43,7 @@ it('moves every row to the right file and drops the originals', function (bool $
     }
 
     expect($this->upgrade->tables(Databases::TELEMETRY))->toEqualCanonicalizing([...Databases::TELEMETRY_TABLES])
-        ->and($this->upgrade->tables(Databases::LOGS))->toEqualCanonicalizing(['log_entries'])
+        ->and($this->upgrade->tables(Databases::LOGS))->toEqualCanonicalizing(['log_entries', 'log_entries_fts'])
         ->and(DB::table('users')->orderBy('id')->get()->all())->toEqual($untouched['users'])
         ->and(DB::table('projects')->orderBy('id')->get()->all())->toEqual($untouched['projects'])
         ->and(Schema::connection('sqlite')->hasTable('jobs'))->toBeTrue()
