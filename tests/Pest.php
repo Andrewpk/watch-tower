@@ -28,6 +28,13 @@ pest()->extend(TestCase::class)
     ->in('Feature');
 
 /*
+| Upgrade tests build their own databases from files and run the migrations by hand, so they must not share
+| RefreshDatabase's migrated in-memory connection.
+*/
+pest()->extend(TestCase::class)
+    ->in('Upgrade');
+
+/*
 |--------------------------------------------------------------------------
 | Expectations
 |--------------------------------------------------------------------------
