@@ -26,7 +26,7 @@ class LogStats
         $query = $this->baseQuery($project, $range);
 
         if ($search !== null && $search !== '') {
-            $query->where('message', 'like', '%'.$search.'%');
+            $query->searchMessage($search);
         }
         if ($level !== null && $level !== '' && in_array($level, self::LEVELS, true)) {
             $query->where('level', $level);
