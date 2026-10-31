@@ -3,6 +3,7 @@
 use App\Watch\Databases;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
@@ -153,6 +154,13 @@ describe('splitting a MySQL connection', function () {
             ->and($config['password'])->toBe('secret');
     });
 
+    it('drops the inherited unix socket when the host is overridden, because the socket would win', function () {
+        $base = baseMysqlConnection(['unix_socket' => '/var/run/mysqld/mysqld.sock']);
+
+        expect(Databases::splitConnection($base, 'x.sqlite', ['host' => 'telemetry.internal'])['unix_socket'])->toBeEmpty()
+            ->and(Databases::splitConnection($base, 'x.sqlite', ['database' => 'other'])['unix_socket'])->toBe('/var/run/mysqld/mysqld.sock');
+    });
+
     it('expands a base URL so a single override is not undone by it', function () {
         $config = Databases::splitConnection(
             baseMysqlConnection(['url' => 'mysql://user:pass@urlhost:3307/urldb']),
@@ -216,6 +224,13 @@ describe('comparing SQLite databases', function () {
         expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
     });
 
+    it('recognises a hard link, which has another path but is the same file', function () {
+        link("{$this->directory}/one.sqlite", "{$this->directory}/hard.sqlite");
+        config(['database.connections.alias' => baseSqliteConnection("{$this->directory}/hard.sqlite")]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
+    });
+
     it('never treats in-memory databases as shared', function () {
         config([
             'database.connections.one' => baseSqliteConnection(':memory:'),
@@ -223,6 +238,63 @@ describe('comparing SQLite databases', function () {
         ]);
 
         expect(Databases::sameDatabase('one', 'two'))->toBeFalse();
+    });
+});
+
+describe('comparing server connections', function () {
+    it('recognises identical settings without touching the server', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'username' => 'someone else']),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeTrue();
+    });
+
+    it('never mixes drivers', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'driver' => 'mariadb']),
+            'database.connections.file' => baseSqliteConnection(':memory:'),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeFalse()
+            ->and(Databases::sameDatabase('first', 'file'))->toBeFalse();
+    });
+});
+
+describe('probing for a shared database', function () {
+    beforeEach(function () {
+        $this->directory = sys_get_temp_dir().'/watch-tower-databases-'.Str::lower(Str::random(8));
+        File::ensureDirectoryExists($this->directory);
+
+        foreach (['one', 'two'] as $name) {
+            config(["database.connections.{$name}" => [...baseSqliteConnection("{$this->directory}/{$name}.sqlite"), 'journal_mode' => 'delete']]);
+            touch("{$this->directory}/{$name}.sqlite");
+        }
+
+        symlink("{$this->directory}/one.sqlite", "{$this->directory}/link.sqlite");
+        config(['database.connections.alias' => [...baseSqliteConnection("{$this->directory}/link.sqlite"), 'journal_mode' => 'delete']]);
+    });
+
+    afterEach(function () {
+        foreach (['one', 'two', 'alias'] as $name) {
+            DB::purge($name);
+        }
+
+        File::deleteDirectory($this->directory);
+    });
+
+    it('sees a table created through one connection from the other when they share a database', function () {
+        expect(Databases::sharesProbeTable('one', 'alias'))->toBeTrue()
+            ->and(Databases::sharesProbeTable('one', 'two'))->toBeFalse();
+    });
+
+    it('leaves no probe table behind', function () {
+        Databases::sharesProbeTable('one', 'alias');
+        Databases::sharesProbeTable('one', 'two');
+
+        expect(collect(Schema::connection('one')->getTables())->pluck('name')->all())->toBe([]);
     });
 });
 

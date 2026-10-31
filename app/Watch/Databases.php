@@ -2,9 +2,12 @@
 
 namespace App\Watch;
 
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\ConfigurationUrlParser;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use RuntimeException;
+use Throwable;
 
 /**
  * Where each table lives.
@@ -102,6 +105,10 @@ final class Databases
             }
         }
 
+        if (filled($overrides['host'] ?? null)) {
+            $config['unix_socket'] = '';
+        }
+
         if (filled($overrides['url'] ?? null)) {
             $config['url'] = $overrides['url'];
         }
@@ -112,8 +119,10 @@ final class Databases
     /**
      * Whether two connections open the same physical database.
      *
-     * Two in-memory SQLite connections never share data. File databases are compared by their resolved path, and
-     * MySQL by the server and schema the session is actually using.
+     * Decided without trusting what a session reports about itself (a proxy or cluster makes every server look alike):
+     * the same connection is one database, and so are two with the same resolved settings; connections of different
+     * drivers are never one. SQLite files are compared by device and inode, which also catches hard links, and an
+     * in-memory database is never shared. Anything else is settled by {@see sharesProbeTable()}.
      */
     public static function sameDatabase(string $first, string $second): bool
     {
@@ -121,20 +130,92 @@ final class Databases
             return true;
         }
 
-        $driver = DB::connection($first)->getDriverName();
+        $firstConfig = self::identity($first);
+        $secondConfig = self::identity($second);
 
-        if ($driver !== DB::connection($second)->getDriverName()) {
+        if ($firstConfig['driver'] !== $secondConfig['driver']) {
             return false;
         }
 
-        if ($driver === 'sqlite') {
-            $firstPath = self::sqlitePath($first);
-            $secondPath = self::sqlitePath($second);
-
-            return $firstPath !== null && $firstPath === $secondPath;
+        if ($firstConfig['driver'] === 'sqlite') {
+            return ! self::isInMemory($first) && ! self::isInMemory($second)
+                && ($firstConfig === $secondConfig || self::sameFile($firstConfig['database'], $secondConfig['database']));
         }
 
-        return self::serverIdentity($first) === self::serverIdentity($second);
+        if ($firstConfig === $secondConfig) {
+            return true;
+        }
+
+        return self::sharesProbeTable($first, $second);
+    }
+
+    /**
+     * The settings that decide which database a connection opens.
+     *
+     * @return array{driver: mixed, host: mixed, port: mixed, database: mixed, unix_socket: mixed}
+     */
+    private static function identity(string $connection): array
+    {
+        $config = config("database.connections.{$connection}");
+        $config = is_array($config) ? $config : [];
+        $driver = $config['driver'] ?? null;
+        $database = $config['database'] ?? null;
+
+        if ($driver === 'sqlite' && is_string($database) && $database !== '') {
+            $database = realpath($database) ?: $database;
+        }
+
+        return [
+            'driver' => $driver,
+            'host' => $config['host'] ?? null,
+            'port' => isset($config['port']) ? (string) $config['port'] : null,
+            'database' => $database,
+            'unix_socket' => ($config['unix_socket'] ?? null) ?: null,
+        ];
+    }
+
+    /**
+     * Whether a SQLite connection has no file behind it (in memory or temporary).
+     */
+    private static function isInMemory(string $connection): bool
+    {
+        $path = config("database.connections.{$connection}.database");
+
+        return ! is_string($path) || $path === '' || $path === ':memory:' || str_contains($path, 'mode=memory');
+    }
+
+    /**
+     * Whether two paths are one file on disk, as seen by the file system (a hard link has another path, not another
+     * file; an SQLite database must never be opened through two of them, so a probe table would not be reliable).
+     */
+    private static function sameFile(mixed $first, mixed $second): bool
+    {
+        $firstStat = is_string($first) ? @stat($first) : false;
+        $secondStat = is_string($second) ? @stat($second) : false;
+
+        return $firstStat !== false && $secondStat !== false
+            && $firstStat['dev'] === $secondStat['dev']
+            && $firstStat['ino'] === $secondStat['ino'];
+    }
+
+    /**
+     * Create a uniquely named table through the first connection and check whether the second can see it. The table is
+     * always dropped again.
+     */
+    public static function sharesProbeTable(string $first, string $second): bool
+    {
+        $name = 'watch_db_probe_'.Str::lower(Str::random(12));
+        $schema = DB::connection($first)->getSchemaBuilder();
+
+        try {
+            $schema->create($name, fn (Blueprint $table) => $table->id());
+
+            return DB::connection($second)->getSchemaBuilder()->hasTable($name);
+        } catch (Throwable $exception) {
+            throw new RuntimeException("Cannot tell whether the [{$first}] and [{$second}] connections are the same database, so nothing was changed: ".$exception->getMessage(), previous: $exception);
+        } finally {
+            $schema->dropIfExists($name);
+        }
     }
 
     /**
@@ -199,23 +280,5 @@ final class Databases
         }
 
         return $directory.DIRECTORY_SEPARATOR.$fileName;
-    }
-
-    /**
-     * Server and schema a session is connected to, as reported by the server itself, so host aliases do not matter.
-     */
-    private static function serverIdentity(string $connection): string
-    {
-        $connection = DB::connection($connection);
-
-        if (in_array($connection->getDriverName(), ['mysql', 'mariadb'], true)) {
-            $row = $connection->selectOne('select @@hostname as host, @@port as port, database() as schema_name');
-
-            return json_encode([$row->host ?? null, $row->port ?? null, $row->schema_name ?? null]);
-        }
-
-        $config = $connection->getConfig();
-
-        return json_encode([$config['host'] ?? null, $config['port'] ?? null, $config['database'] ?? null]);
     }
 }
