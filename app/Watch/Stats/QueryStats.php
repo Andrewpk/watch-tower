@@ -22,9 +22,10 @@ class QueryStats
         ?string $dir,
         int $page,
         int $perPage,
+        ?string $connection = null,
     ): LengthAwarePaginator {
         $paginator = StatsPaginator::paginate(
-            items: $this->queries($project, $range, $search, withLocations: false),
+            items: $this->queries($project, $range, $search, $connection, withLocations: false),
             sortable: [
                 'sql' => 'string',
                 'connection' => 'string',
@@ -41,8 +42,25 @@ class QueryStats
 
         // Locations are looked up for the statements on this page only, which bounds the cost by the page size.
         return $paginator->setCollection(
-            collect($this->withLocations($project, $range, $search, array_values($paginator->items()))),
+            collect($this->withLocations($project, $range, $search, array_values($paginator->items()), $connection)),
         );
+    }
+
+    /**
+     * The distinct connections that ran statements in range, for the filter on the Queries page.
+     *
+     * @return list<string>
+     */
+    public function connections(Project $project, TimeRange $range): array
+    {
+        return $this->baseQuery($project, $range)
+            ->whereNotNull('connection_name')
+            ->select('connection_name')
+            ->distinct()
+            ->orderBy('connection_name')
+            ->pluck('connection_name')
+            ->map(fn ($value) => (string) $value)
+            ->all();
     }
 
     /**
@@ -51,9 +69,9 @@ class QueryStats
      *   buckets: list<array{bucket:string,count:int,avg_duration:float|null,p95_duration:float|null}>
      * }
      */
-    public function summary(Project $project, TimeRange $range, ?string $sql = null): array
+    public function summary(Project $project, TimeRange $range, ?string $sql = null, ?string $connection = null): array
     {
-        $base = $this->baseQuery($project, $range, $sql);
+        $base = $this->baseQuery($project, $range, $sql, $connection);
 
         $stats = (clone $base)
             ->selectRaw('COUNT(*) AS total')
@@ -77,16 +95,16 @@ class QueryStats
                 'avg_ms' => $stats?->avg_duration !== null ? (float) $stats->avg_duration : null,
                 'p95_ms' => $this->percentile($durations, 0.95),
             ],
-            'buckets' => $this->buckets($project, $range, $sql),
+            'buckets' => $this->buckets($project, $range, $sql, $connection),
         ];
     }
 
     /**
      * @return list<array{hash:string,sql:string,connection:string|null,total:int,total_ms:float,avg_ms:float|null,p95_ms:float|null,location:string|null,locations_count:int}>
      */
-    public function queries(Project $project, TimeRange $range, ?string $search = null, bool $withLocations = true): array
+    public function queries(Project $project, TimeRange $range, ?string $search = null, ?string $connection = null, bool $withLocations = true): array
     {
-        $base = $this->baseQuery($project, $range);
+        $base = $this->baseQuery($project, $range, connection: $connection);
 
         if ($search !== null && $search !== '') {
             $base->where('sql', 'like', '%'.$search.'%');
@@ -101,7 +119,7 @@ class QueryStats
             ->groupBy('sql')
             ->get();
 
-        $durationsBySql = $this->durationsBySql($project, $range, $search);
+        $durationsBySql = $this->durationsBySql($project, $range, $search, $connection);
 
         $items = $rows
             ->map(function ($row) use ($durationsBySql) {
@@ -124,7 +142,7 @@ class QueryStats
             ->values()
             ->all();
 
-        return $withLocations ? $this->withLocations($project, $range, $search, $items) : $items;
+        return $withLocations ? $this->withLocations($project, $range, $search, $items, $connection) : $items;
     }
 
     /**
@@ -238,7 +256,7 @@ class QueryStats
     /**
      * @return Builder<TraceQuery>
      */
-    private function baseQuery(Project $project, TimeRange $range, ?string $sql = null): Builder
+    private function baseQuery(Project $project, TimeRange $range, ?string $sql = null, ?string $connection = null): Builder
     {
         $query = TraceQuery::query()
             ->where('project_id', $project->id)
@@ -248,19 +266,23 @@ class QueryStats
             $query->where('sql', $sql);
         }
 
+        if ($connection !== null && $connection !== '') {
+            $query->where('connection_name', $connection);
+        }
+
         return $query;
     }
 
     /**
      * @return list<array{bucket:string,count:int,avg_duration:float|null,p95_duration:float|null}>
      */
-    private function buckets(Project $project, TimeRange $range, ?string $sql = null): array
+    private function buckets(Project $project, TimeRange $range, ?string $sql = null, ?string $connection = null): array
     {
         $bucketCount = 60;
         $totalSeconds = max(1, $range->from->diffInSeconds($range->to));
         $bucketSeconds = max(1, intdiv($totalSeconds, $bucketCount));
 
-        $rows = $this->baseQuery($project, $range, $sql)
+        $rows = $this->baseQuery($project, $range, $sql, $connection)
             ->orderBy('occurred_at')
             ->get(['duration_ms', 'occurred_at']);
 
@@ -298,9 +320,9 @@ class QueryStats
     /**
      * @return array<string, list<float>>
      */
-    private function durationsBySql(Project $project, TimeRange $range, ?string $search): array
+    private function durationsBySql(Project $project, TimeRange $range, ?string $search, ?string $connection = null): array
     {
-        $query = $this->baseQuery($project, $range);
+        $query = $this->baseQuery($project, $range, connection: $connection);
 
         if ($search !== null && $search !== '') {
             $query->where('sql', 'like', '%'.$search.'%');
@@ -327,9 +349,9 @@ class QueryStats
      * @param  list<array<string, mixed>>  $items
      * @return list<array<string, mixed>>
      */
-    private function withLocations(Project $project, TimeRange $range, ?string $search, array $items): array
+    private function withLocations(Project $project, TimeRange $range, ?string $search, array $items, ?string $connection = null): array
     {
-        $locationsBySql = $this->locationsBySql($project, $range, $search, array_column($items, 'sql'));
+        $locationsBySql = $this->locationsBySql($project, $range, $search, array_column($items, 'sql'), $connection);
 
         return array_map(function (array $item) use ($locationsBySql): array {
             $locations = $locationsBySql[$item['sql']] ?? [];
@@ -349,13 +371,13 @@ class QueryStats
      * @param  list<string>  $statements
      * @return array<string, list<array{file:string,line:int|null,total:int}>>
      */
-    private function locationsBySql(Project $project, TimeRange $range, ?string $search, array $statements): array
+    private function locationsBySql(Project $project, TimeRange $range, ?string $search, array $statements, ?string $connection = null): array
     {
         if ($statements === []) {
             return [];
         }
 
-        $query = $this->baseQuery($project, $range)->whereNotNull('file')->whereIn('sql', $statements);
+        $query = $this->baseQuery($project, $range, connection: $connection)->whereNotNull('file')->whereIn('sql', $statements);
 
         if ($search !== null && $search !== '') {
             $query->where('sql', 'like', '%'.$search.'%');
