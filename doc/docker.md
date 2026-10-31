@@ -73,7 +73,7 @@ Restore all three files from the same backup.
 
 ### Upgrading from a single database
 
-This version moves telemetry and logs out of the app database when its migrations run, then builds the log search index. It copies the data, checks that the row counts match, and only then drops the old tables. If the migration crashes or restarts part way through, the next run picks up where it left off, as long as `database.sqlite` is still the same file.
+This version moves telemetry and logs out of the app database when its migrations run, then builds the log search index. It copies the data, checks that the row counts match and that the old tables haven't visibly changed, and only then drops them. If the migration crashes or restarts part way through, run it again: it throws away an unfinished copy and starts that step over, or finishes the last step if the copy was already checked. This needs `database.sqlite` to be the same file as before the crash.
 
 1. **Back up** `storage/database/`, or your MySQL database. See [Backups](#backups).
 2. **Stop every container that runs the old version**, including workers and schedulers. The move notices most writes that happen while it runs and stops with an error, leaving the data in the old tables, but it can't notice all of them, and a write it misses is lost.
@@ -86,7 +86,7 @@ This version moves telemetry and logs out of the app database when its migration
      ghcr.io/andrewpk/watch-tower:<new-version> php artisan migrate --force
    ```
 
-5. **Start the new version** as usual.
+5. **Start the new version** only after the migrations have finished successfully. If they fail, fix the cause and run step 4 again. Rows the new version writes while a copy is unfinished are lost when the copy is redone.
 
 For a small install you can skip step 4 and let `AUTORUN_ENABLED=true` do it on start. Don't do that on a large database on a platform that replaces containers that fail a health check, such as Docker Swarm: the web server only starts after the migrations finish, so a long move can be cut off and start over.
 
@@ -94,7 +94,9 @@ For a small install you can skip step 4 and let `AUTORUN_ENABLED=true` do it on 
 - **Time.** Seconds for a small database, minutes for several GB.
 - **Several containers at once.** If two containers run the migrations together, the move runs once: the second waits, then finds nothing left to do. The second can still exit with `database is locked` while the first is busy, because Laravel reads its own migrations table before the wait starts. No data is affected, and a restart succeeds.
 - **MySQL.** With the default settings nothing is copied: the tables stay in the one database and only their foreign keys to `users` and `projects` are dropped. The search index is the slow part: adding it rebuilds `log_entries` and blocks writes to that table, so do it in a maintenance window if the table is large. It needs free disk about the size of the table. Deleted rows stay in the index until you run `OPTIMIZE TABLE log_entries`.
-- **Both databases hold data.** If the old tables and the new database both hold rows, for example after restoring an old backup of only `database.sqlite`, the migration stops with an error and changes nothing. Restore all three files from the same backup.
+- **Both databases hold data.** If the old tables and the new database both hold rows and nothing shows which copy is right, for example after restoring an old backup of only `database.sqlite`, the migration stops with an error and changes nothing. To go back to a backup from before the upgrade, delete `telemetry.sqlite` and `logs.sqlite` with their `-wal` and `-shm` files, because that backup doesn't include them. Don't empty individual tables: foreign keys can delete rows in other tables.
+- **Rolling back.** If `php artisan migrate:rollback` is interrupted, run it again before anything else.
+- **MySQL with separate databases.** The user needs the `LOCK TABLES` privilege on the app database.
 
 ## Run
 
