@@ -214,3 +214,37 @@ it('times out before the queue hands the job to another worker', function () {
 
     expect((new DeleteProjectData($this->project->id))->timeout)->toBeLessThan($retryAfters->min());
 });
+
+it('removes the rows a failed final purge left behind when the job is retried', function () {
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+
+    $failing = new class extends TelemetryPruner
+    {
+        public int $calls = 0;
+
+        public ?Project $project = null;
+
+        public function purge(string $projectId, ?int $maxChunks = null, ?float $deadline = null): array
+        {
+            if (++$this->calls === 2) {
+                seedTelemetry($this->project, now());
+
+                throw new RuntimeException('database went away');
+            }
+
+            return parent::purge($projectId, $maxChunks, $deadline);
+        }
+    };
+
+    $failing->project = $this->project;
+
+    expect(fn () => (new DeleteProjectData($this->project->id))->handle($failing))->toThrow(RuntimeException::class, 'database went away');
+
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(remainingProjectRows($this->project))->toBeGreaterThan(0);
+
+    (new DeleteProjectData($this->project->id))->handle(new TelemetryPruner);
+
+    expect(remainingProjectRows($this->project))->toBe(0);
+});

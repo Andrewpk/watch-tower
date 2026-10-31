@@ -94,7 +94,17 @@ class DeleteProjectData implements ShouldQueue
     {
         $project = Project::withoutGlobalScope('notDeleting')->find($this->projectId);
 
-        if (! $project || $project->deleting_at === null) {
+        if (! $project) {
+            /*
+             * A previous attempt deleted the project row but failed in the final purge below. Nothing else would ever
+             * remove those rows, since no foreign key or sweep links telemetry to projects.
+             */
+            $pruner->purge($this->projectId);
+
+            return;
+        }
+
+        if ($project->deleting_at === null) {
             return;
         }
 
