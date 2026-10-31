@@ -376,6 +376,27 @@ it('is resolvable from the container with its defaults', function () {
  *
  * @return list<MovedTable>
  */
+/**
+ * Create the marker table in the telemetry database with the given rows (table name => fingerprint or null).
+ *
+ * @param  array<string, string|null>  $rows
+ */
+function writeMarker(array $rows): void
+{
+    $schema = Schema::connection(Databases::TELEMETRY);
+
+    if (! $schema->hasTable(TableMover::MARKER_TABLE)) {
+        $schema->create(TableMover::MARKER_TABLE, function ($table): void {
+            $table->string('table_name')->primary();
+            $table->text('fingerprint')->nullable();
+        });
+    }
+
+    foreach ($rows as $name => $fingerprint) {
+        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->updateOrInsert(['table_name' => $name], ['fingerprint' => $fingerprint]);
+    }
+}
+
 function telemetryTables(object $test): array
 {
     return $test->upgrade->splitMigration('telemetry')->tables();
@@ -479,8 +500,7 @@ describe('never destroying data', function () {
         $this->upgrade->legacy()->seed();
         $this->upgrade->migrate();
         $before = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
-        Schema::connection(Databases::TELEMETRY)->create(TableMover::MARKER_TABLE, fn ($table) => $table->string('table_name')->primary());
-        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->insert(['table_name' => 'traces']);
+        writeMarker(['traces' => '{"row_count":25}']);
 
         $this->upgrade->splitMigration('telemetry')->up();
 

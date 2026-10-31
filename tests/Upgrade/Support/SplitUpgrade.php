@@ -3,6 +3,7 @@
 namespace Tests\Upgrade\Support;
 
 use App\Watch\Databases;
+use App\Watch\MoveLock;
 use App\Watch\TableMover;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\Artisan;
@@ -134,7 +135,7 @@ final class SplitUpgrade
     /**
      * Make the next `app(TableMover::class)` use small chunks so every table spans several of them.
      */
-    public function useSmallChunks(bool $genericCopy = false, ?callable $freeDiskSpace = null, ?callable $afterCopy = null): void
+    public function useSmallChunks(bool $genericCopy = false, ?callable $freeDiskSpace = null, ?callable $afterCopy = null, ?MoveLock $lock = null): void
     {
         app()->bind(TableMover::class, fn (): TableMover => new TableMover(
             chunkSize: 7,
@@ -142,6 +143,7 @@ final class SplitUpgrade
             forceGenericCopy: $genericCopy,
             freeDiskSpace: $freeDiskSpace === null ? null : $freeDiskSpace(...),
             afterCopy: $afterCopy === null ? null : $afterCopy(...),
+            lock: $lock,
         ));
     }
 

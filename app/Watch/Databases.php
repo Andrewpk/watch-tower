@@ -295,6 +295,21 @@ final class Databases
     }
 
     /**
+     * The file a SQLite connection is configured to open, resolved through links, or null for an in-memory or temporary
+     * database. Unlike {@see sqlitePath()} it does not connect.
+     */
+    public static function configuredSqlitePath(string $connection): ?string
+    {
+        if (self::isInMemory($connection)) {
+            return null;
+        }
+
+        $path = (string) self::resolvedConfig($connection)['database'];
+
+        return realpath($path) ?: (function_exists('base_path') ? realpath(base_path($path)) : false) ?: $path;
+    }
+
+    /**
      * Where a split SQLite database goes by default: beside the app database, or in memory with it.
      */
     private static function siblingSqlitePath(string $appDatabase, string $fileName): string
