@@ -31,6 +31,31 @@
         <env name="DB_CONNECTION" value="sqlite"/>
         <env name="DB_DATABASE" value=":memory:"/>
         <env name="DB_URL" value=""/>
+        <!-- Laravel reads $_SERVER before $_ENV, and PHPUnit only sets $_SERVER from <server>. -->
+        <env name="DB_TELEMETRY_DATABASE" value="" force="true"/>
+        <env name="DB_TELEMETRY_URL" value="" force="true"/>
+        <env name="DB_TELEMETRY_HOST" value="" force="true"/>
+        <env name="DB_TELEMETRY_PORT" value="" force="true"/>
+        <env name="DB_TELEMETRY_USERNAME" value="" force="true"/>
+        <env name="DB_TELEMETRY_PASSWORD" value="" force="true"/>
+        <env name="DB_LOGS_DATABASE" value="" force="true"/>
+        <env name="DB_LOGS_URL" value="" force="true"/>
+        <env name="DB_LOGS_HOST" value="" force="true"/>
+        <env name="DB_LOGS_PORT" value="" force="true"/>
+        <env name="DB_LOGS_USERNAME" value="" force="true"/>
+        <env name="DB_LOGS_PASSWORD" value="" force="true"/>
+        <server name="DB_TELEMETRY_DATABASE" value="" force="true"/>
+        <server name="DB_TELEMETRY_URL" value="" force="true"/>
+        <server name="DB_TELEMETRY_HOST" value="" force="true"/>
+        <server name="DB_TELEMETRY_PORT" value="" force="true"/>
+        <server name="DB_TELEMETRY_USERNAME" value="" force="true"/>
+        <server name="DB_TELEMETRY_PASSWORD" value="" force="true"/>
+        <server name="DB_LOGS_DATABASE" value="" force="true"/>
+        <server name="DB_LOGS_URL" value="" force="true"/>
+        <server name="DB_LOGS_HOST" value="" force="true"/>
+        <server name="DB_LOGS_PORT" value="" force="true"/>
+        <server name="DB_LOGS_USERNAME" value="" force="true"/>
+        <server name="DB_LOGS_PASSWORD" value="" force="true"/>
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>

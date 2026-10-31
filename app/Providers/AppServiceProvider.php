@@ -4,15 +4,12 @@ namespace App\Providers;
 
 use App\Models\Project;
 use App\Models\User;
-use App\Watch\Databases;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
-use Illuminate\Database\Events\DatabaseRefreshed;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Route;
@@ -32,45 +29,6 @@ class AppServiceProvider extends ServiceProvider
         $this->registerGates();
         $this->registerRouteBindings();
         $this->configureRateLimiting();
-        $this->clearSplitDatabasesOnFresh();
-    }
-
-    /**
-     * Make `migrate:fresh` wipe the telemetry and log databases too.
-     *
-     * Those tables live in databases of their own that `migrate:fresh` does not drop, and `migrate` keeps telemetry
-     * that is already there when only the app database was wiped (so an app volume lost on its own never costs the
-     * telemetry). `migrate:fresh` is a deliberate reset, so it empties them itself, after its production
-     * confirmation. Deleting rather than truncating fires the full-text index triggers and respects MySQL foreign keys.
-     */
-    protected function clearSplitDatabasesOnFresh(): void
-    {
-        Event::listen(function (DatabaseRefreshed $event): void {
-            $default = (string) config('database.default');
-
-            if ($event->database !== null && $event->database !== $default) {
-                return;
-            }
-
-            $groups = [
-                Databases::TELEMETRY => Databases::TELEMETRY_TABLES,
-                Databases::LOGS => Databases::LOG_TABLES,
-            ];
-
-            foreach ($groups as $connection => $tables) {
-                if (Databases::sameDatabase($default, $connection)) {
-                    continue;
-                }
-
-                $schema = DB::connection($connection)->getSchemaBuilder();
-
-                foreach (array_reverse($tables) as $table) {
-                    if ($schema->hasTable($table)) {
-                        DB::connection($connection)->table($table)->delete();
-                    }
-                }
-            }
-        });
     }
 
     /**

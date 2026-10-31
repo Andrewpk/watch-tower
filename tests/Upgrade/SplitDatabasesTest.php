@@ -326,11 +326,12 @@ it('creates the telemetry and logs files when they do not exist', function () {
         ->and(file_exists($this->upgrade->path('logs')))->toBeTrue();
 });
 
-it('leaves the telemetry empty after migrate:fresh, whatever the old files held', function () {
+it('keeps the telemetry and logs when migrate:fresh resets the app database', function () {
     $this->upgrade->legacy()->seed();
     $this->upgrade->migrate();
+    $before = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
 
-    expect(DB::connection(Databases::TELEMETRY)->table('traces')->count())->toBe($this->upgrade->rows);
+    DB::table('users')->update(['name' => 'changed']);
 
     Artisan::call('migrate:fresh', ['--force' => true]);
 
@@ -338,11 +339,8 @@ it('leaves the telemetry empty after migrate:fresh, whatever the old files held'
         expect(Schema::connection('sqlite')->hasTable($table))->toBeFalse();
     }
 
-    foreach (Databases::TELEMETRY_TABLES as $table) {
-        expect(DB::connection(Databases::TELEMETRY)->table($table)->count())->toBe(0, $table);
-    }
-
-    expect(DB::connection(Databases::LOGS)->table('log_entries')->count())->toBe(0);
+    expect(DB::table('users')->count())->toBe(0)
+        ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
 });
 
 it('moves an install that only has the empty schema', function () {
@@ -491,16 +489,15 @@ describe('never destroying data', function () {
     });
 });
 
-describe('migrate:fresh', function () {
-    it('empties the telemetry and logs but plain migrate does not', function () {
+describe('resetting the app database', function () {
+    it('keeps every telemetry and log row on migrate:refresh --step=1', function () {
         $this->upgrade->legacy()->seed();
         $this->upgrade->migrate();
+        $before = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
 
-        Artisan::call('migrate:fresh', ['--force' => true]);
-
-        expect(DB::connection(Databases::TELEMETRY)->table('traces')->count())->toBe(0)
-            ->and(DB::connection(Databases::LOGS)->table('log_entries')->count())->toBe(0)
-            ->and(DB::connection(Databases::LOGS)->select("select count(*) as c from log_entries_fts where log_entries_fts match 'pay'")[0]->c ?? 0)->toBe(0);
+        expect(Artisan::call('migrate:refresh', ['--step' => 1, '--force' => true]))->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before)
+            ->and(DB::connection(Databases::LOGS)->select("select count(*) as c from log_entries_fts where log_entries_fts match 'pay'")[0]->c)->toBeGreaterThan(0);
     });
 });
 
