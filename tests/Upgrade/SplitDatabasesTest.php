@@ -1,9 +1,12 @@
 <?php
 
 use App\Watch\Databases;
+use App\Watch\MovedTable;
 use App\Watch\TableMover;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Tests\Upgrade\Support\SplitUpgrade;
 
@@ -368,4 +371,332 @@ it('works on in-memory databases, which are always separate', function () {
 
 it('is resolvable from the container with its defaults', function () {
     expect(app(TableMover::class))->toBeInstanceOf(TableMover::class);
+});
+
+/**
+ * The frozen schema of the telemetry migration, for driving a mover by hand.
+ *
+ * @return list<MovedTable>
+ */
+function telemetryTables(object $test): array
+{
+    return $test->upgrade->splitMigration('telemetry')->tables();
+}
+
+/**
+ * Run the telemetry move with a crash after the copy, leaving a full copy beside the originals and the marker table.
+ */
+function leaveHalfFinishedTelemetryMove(object $test): void
+{
+    $test->upgrade->useSmallChunks(afterCopy: fn () => throw new RuntimeException('simulated crash'));
+
+    expect(fn () => $test->upgrade->migrate())->toThrow(RuntimeException::class, 'simulated crash');
+}
+
+describe('never destroying data', function () {
+    it('keeps the telemetry and logs when only the app database was lost and migrate runs again', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+        $before = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
+        Log::spy();
+
+        $this->upgrade->replaceAppDatabaseWithEmptyLegacy();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before)
+            ->and($this->upgrade->tables('sqlite'))->not->toContain('traces', 'log_entries');
+
+        Log::shouldHaveReceived('warning')->with(Mockery::pattern('/already holds this table/'), Mockery::on(fn (array $context): bool => $context['table'] === 'traces'))->once();
+    });
+
+    it('refuses before changing anything when both databases hold rows and nothing says which is real', function () {
+        $this->upgrade->legacy()->seed();
+        leaveHalfFinishedTelemetryMove($this);
+        Schema::connection(Databases::TELEMETRY)->drop(TableMover::MARKER_TABLE);
+        $appBefore = $this->upgrade->snapshot('sqlite', 'sqlite');
+        $telemetryBefore = $this->upgrade->rows(Databases::TELEMETRY, 'traces');
+        $this->upgrade->useSmallChunks();
+
+        $message = null;
+
+        try {
+            $this->upgrade->migrate();
+        } catch (RuntimeException $exception) {
+            $message = $exception->getMessage();
+        }
+
+        expect($message)->toContain('traces', 'error_groups', '[sqlite]', '[telemetry]', 'Nothing was changed')
+            ->and($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($appBefore)
+            ->and($this->upgrade->rows(Databases::TELEMETRY, 'traces'))->toEqual($telemetryBefore)
+            ->and(Schema::connection(Databases::TELEMETRY)->hasTable(TableMover::MARKER_TABLE))->toBeFalse();
+    });
+
+    it('copies again over an empty target table', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        leaveHalfFinishedTelemetryMove($this);
+
+        Schema::connection(Databases::TELEMETRY)->drop(TableMover::MARKER_TABLE);
+        Schema::connection(Databases::TELEMETRY)->disableForeignKeyConstraints();
+
+        foreach (array_reverse(Databases::TELEMETRY_TABLES) as $table) {
+            DB::connection(Databases::TELEMETRY)->table($table)->delete();
+        }
+
+        $this->upgrade->useSmallChunks();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
+    });
+
+    it('recopies tables that the marker lists even when they hold rows', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        leaveHalfFinishedTelemetryMove($this);
+
+        expect(DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->pluck('table_name')->all())->toEqualCanonicalizing(Databases::TELEMETRY_TABLES);
+
+        DB::connection(Databases::TELEMETRY)->table('end_users')->update(['name' => 'half written']);
+        $this->upgrade->useSmallChunks();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
+    });
+
+    it('leaves no marker table behind', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+
+        expect($this->upgrade->tables(Databases::TELEMETRY))->not->toContain(TableMover::MARKER_TABLE)
+            ->and($this->upgrade->tables(Databases::LOGS))->not->toContain(TableMover::MARKER_TABLE)
+            ->and($this->upgrade->tables('sqlite'))->not->toContain(TableMover::MARKER_TABLE);
+
+        $this->upgrade->rollback();
+
+        expect($this->upgrade->tables('sqlite'))->not->toContain(TableMover::MARKER_TABLE)
+            ->and($this->upgrade->tables(Databases::TELEMETRY))->not->toContain(TableMover::MARKER_TABLE);
+    });
+
+    it('removes a marker left by a crash between dropping the sources and cleaning up', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+        $before = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
+        Schema::connection(Databases::TELEMETRY)->create(TableMover::MARKER_TABLE, fn ($table) => $table->string('table_name')->primary());
+        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->insert(['table_name' => 'traces']);
+
+        $this->upgrade->splitMigration('telemetry')->up();
+
+        expect($this->upgrade->tables(Databases::TELEMETRY))->not->toContain(TableMover::MARKER_TABLE)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
+    });
+});
+
+describe('migrate:fresh', function () {
+    it('empties the telemetry and logs but plain migrate does not', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+
+        Artisan::call('migrate:fresh', ['--force' => true]);
+
+        expect(DB::connection(Databases::TELEMETRY)->table('traces')->count())->toBe(0)
+            ->and(DB::connection(Databases::LOGS)->table('log_entries')->count())->toBe(0)
+            ->and(DB::connection(Databases::LOGS)->select("select count(*) as c from log_entries_fts where log_entries_fts match 'pay'")[0]->c ?? 0)->toBe(0);
+    });
+});
+
+describe('locking the move', function () {
+    it('refuses to start a second move while one is running, and leaves both databases intact', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        $caught = null;
+        $seen = null;
+
+        $this->upgrade->useSmallChunks(afterCopy: function () use (&$caught, &$seen): void {
+            if ($caught !== null) {
+                return;
+            }
+
+            try {
+                (new TableMover(lockTimeoutSeconds: 0))->move(telemetryTables($this), config('database.default'), Databases::TELEMETRY);
+            } catch (RuntimeException $exception) {
+                $caught = $exception;
+            }
+
+            $seen = [
+                DB::table('traces')->count(),
+                DB::connection(Databases::TELEMETRY)->table('traces')->count(),
+                Schema::connection(Databases::TELEMETRY)->hasTable(TableMover::MARKER_TABLE),
+            ];
+        });
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($caught)->toBeInstanceOf(RuntimeException::class)
+            ->and($caught->getMessage())->toContain('Another process is moving tables', 'Nothing was changed')
+            ->and($seen)->toBe([$this->upgrade->rows, $this->upgrade->rows, true])
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
+    });
+
+    it('does nothing when it runs after another move finished, and keeps the lock file', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+        $after = $this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS);
+
+        (new TableMover(lockTimeoutSeconds: 0))->move(telemetryTables($this), config('database.default'), Databases::TELEMETRY);
+
+        expect($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($after)
+            ->and($this->upgrade->tables('sqlite'))->not->toContain('traces', TableMover::MARKER_TABLE)
+            ->and(file_exists($this->upgrade->directory.'/.watch-tower-move.lock'))->toBeTrue();
+    });
+
+    it('fails with a clear error when a table has no column in common with its new schema', function () {
+        $this->upgrade->legacy();
+        Schema::connection('sqlite')->create('only_derived', fn ($table) => $table->integer('seq'));
+        $mover = new TableMover(forceGenericCopy: true);
+        $table = new MovedTable(
+            name: 'only_derived',
+            columns: fn ($blueprint) => $blueprint->string('other'),
+            indexes: fn () => null,
+            derivedColumns: ['seq'],
+        );
+
+        expect(fn () => $mover->move([$table], 'sqlite', Databases::TELEMETRY))->toThrow(RuntimeException::class, 'no column in common');
+        expect(Schema::connection('sqlite')->hasTable('only_derived'))->toBeTrue();
+    });
+});
+
+describe('refusing a database reached through another path', function () {
+    it('refuses when the telemetry file is a hard link to the app file', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        $app = $this->upgrade->path('app');
+        $link = $this->upgrade->directory.'/hardlink.sqlite';
+        link($app, $link);
+        $this->upgrade->pointConnectionsAt($app, $link, $this->upgrade->path('logs'));
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'same SQLite file');
+
+        expect($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($before)
+            ->and(Schema::connection('sqlite')->hasTable('traces'))->toBeTrue();
+    });
+});
+
+describe('noticing changes during the copy', function () {
+    it('drops nothing when a row was updated and the count did not change', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+
+        $this->upgrade->useSmallChunks(afterCopy: fn () => DB::table('mail_sends')->orderBy('id')->limit(1)->update(['updated_at' => '2027-01-01 00:00:00']));
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'Nothing was dropped');
+        expect(Schema::connection('sqlite')->hasTable('mail_sends'))->toBeTrue()
+            ->and(DB::table('mail_sends')->count())->toBe($this->upgrade->rows);
+
+        DB::table('mail_sends')->update(['updated_at' => '2026-10-01 12:00:00']);
+        $this->upgrade->useSmallChunks();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before);
+    });
+
+    it('drops nothing when a row was deleted and replaced by an identical one', function () {
+        $this->upgrade->legacy()->seed();
+
+        $this->upgrade->useSmallChunks(afterCopy: function (): void {
+            $row = (array) DB::table('mail_sends')->orderBy('id')->skip(3)->first();
+            DB::table('mail_sends')->where('id', $row['id'])->delete();
+            DB::table('mail_sends')->insert($row);
+        });
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'Nothing was dropped')
+            ->and(DB::table('mail_sends')->count())->toBe($this->upgrade->rows);
+    });
+});
+
+it('counts the pages of a leftover copy as free when checking the disk', function () {
+    $this->upgrade->legacy()->seed();
+    $names = "'".implode("','", Databases::TELEMETRY_TABLES)."'";
+    $bytes = fn (string $connection): int => (int) DB::connection($connection)->selectOne("select sum(pgsize) as bytes from dbstat where name in (select name from sqlite_master where tbl_name in ({$names}))")->bytes;
+    $source = $bytes('sqlite');
+
+    leaveHalfFinishedTelemetryMove($this);
+
+    expect($bytes(Databases::TELEMETRY))->toBeGreaterThan($source * 0.9);
+
+    $this->upgrade->useSmallChunks(freeDiskSpace: fn (string $directory) => (int) ($source * 1.05));
+
+    expect($this->upgrade->migrate())->toBe(0);
+});
+
+it('names the target file when the disk is too small', function () {
+    $this->upgrade->legacy()->seed();
+    $this->upgrade->useSmallChunks(freeDiskSpace: fn (string $directory) => 1_000);
+
+    try {
+        $this->upgrade->migrate();
+        $this->fail('The migration should have been refused.');
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toContain($this->upgrade->path('telemetry'), '[telemetry]');
+    }
+});
+
+describe('copying through PHP', function () {
+    it('defaults to small reads', function () {
+        expect((new ReflectionProperty(TableMover::class, 'genericChunkSize'))->getValue(new TableMover))->toBe(200);
+    });
+
+    it('copies large rows in batches below the packet limit', function () {
+        $this->upgrade->legacy()->seed(10);
+        DB::table('log_entries')->update(['message' => str_repeat('x', 300_000)]);
+        $before = $this->upgrade->rows('sqlite', 'log_entries');
+        app()->bind(TableMover::class, fn (): TableMover => new TableMover(genericChunkSize: 200, forceGenericCopy: true));
+        $batches = [];
+
+        DB::listen(function (QueryExecuted $query) use (&$batches): void {
+            if ($query->connectionName === Databases::LOGS && str_starts_with($query->sql, 'insert into "log_entries"')) {
+                $batches[] = count(array_filter($query->bindings, fn ($binding) => is_string($binding) && strlen($binding) >= 300_000));
+            }
+        });
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->rows(Databases::LOGS, 'log_entries'))->toEqual($before)
+            ->and($batches)->toBe([4, 4, 2]);
+    });
+});
+
+describe('vacuuming', function () {
+    it('vacuums the app database once for the whole upgrade, then checkpoints it', function () {
+        $this->upgrade->legacy()->seed();
+        $statements = [];
+
+        DB::listen(function (QueryExecuted $query) use (&$statements): void {
+            if ($query->connectionName === 'sqlite') {
+                $statements[] = strtolower($query->sql);
+            }
+        });
+
+        $this->upgrade->migrate();
+
+        $vacuums = array_keys(array_filter($statements, fn (string $sql): bool => $sql === 'vacuum'));
+        $afterVacuum = array_slice($statements, $vacuums[0] + 1);
+
+        expect($vacuums)->toHaveCount(1)
+            ->and($afterVacuum[0])->toBe('pragma wal_checkpoint(truncate)');
+    });
+});
+
+it('changes nothing with --pretend', function () {
+    $this->upgrade->legacy()->seed();
+    $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+
+    Artisan::call('migrate', [
+        '--pretend' => true,
+        '--force' => true,
+        '--realpath' => true,
+        '--path' => [$this->upgrade->splitMigrationFile('telemetry'), $this->upgrade->splitMigrationFile('logs')],
+    ]);
+
+    expect($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($before)
+        ->and(file_exists($this->upgrade->path('telemetry')))->toBeFalse()
+        ->and(file_exists($this->upgrade->path('logs')))->toBeFalse()
+        ->and(DB::table('migrations')->where('migration', 'like', '%move_telemetry%')->exists())->toBeFalse();
 });

@@ -22,7 +22,7 @@ return new class extends Migration
      */
     public function up(): void
     {
-        app(TableMover::class)->move($this->tables(), config('database.default'), Databases::TELEMETRY);
+        app(TableMover::class)->move($this->tables(), config('database.default'), Databases::TELEMETRY, shrinkSource: false);
     }
 
     /**

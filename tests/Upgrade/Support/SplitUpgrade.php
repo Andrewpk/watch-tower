@@ -80,6 +80,20 @@ final class SplitUpgrade
     }
 
     /**
+     * Lose the app database and start over with an empty pre-split schema, as `migrate` does on a new app volume.
+     */
+    public function replaceAppDatabaseWithEmptyLegacy(): self
+    {
+        $this->purge();
+
+        foreach (['', '-wal', '-shm'] as $suffix) {
+            @unlink($this->path('app').$suffix);
+        }
+
+        return $this->legacy();
+    }
+
+    /**
      * @return list<string>
      */
     public function legacyMigrationFiles(): array
