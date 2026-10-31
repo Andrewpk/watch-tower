@@ -381,7 +381,7 @@ it('is resolvable from the container with its defaults', function () {
  *
  * @param  array<string, string|null>  $rows
  */
-function writeMarker(array $rows): void
+function writeMarker(array $rows, bool $verified = true): void
 {
     $schema = Schema::connection(Databases::TELEMETRY);
 
@@ -389,11 +389,12 @@ function writeMarker(array $rows): void
         $schema->create(TableMover::MARKER_TABLE, function ($table): void {
             $table->string('table_name')->primary();
             $table->text('fingerprint')->nullable();
+            $table->boolean('verified')->default(false);
         });
     }
 
     foreach ($rows as $name => $fingerprint) {
-        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->updateOrInsert(['table_name' => $name], ['fingerprint' => $fingerprint]);
+        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->updateOrInsert(['table_name' => $name], ['fingerprint' => $fingerprint, 'verified' => $verified]);
     }
 }
 

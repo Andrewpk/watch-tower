@@ -42,15 +42,18 @@ use Throwable;
  *
  * The marker table records what a run did to the target, one row per table:
  *
- * - a row with no fingerprint is written before the target is touched. The target table is a disposable, possibly
- *   half-written copy; a rerun drops it and copies again;
- * - the fingerprint of the verified source is written in one transaction right before the first source table is
- *   dropped. From then on the target is the only complete copy and the source is a leftover. A rerun that finds the
- *   source unchanged just finishes dropping it; one that finds the source different (an older backup restored, say)
- *   stops, because nobody can tell which copy is the real one;
+ * - an unverified row (`verified` false) is written before the target is touched, with the fingerprint of the source
+ *   at that moment. The target table is a possibly half-written copy of that source. A rerun that finds the source
+ *   unchanged drops the target table and copies again; one that finds the source different (an older backup restored,
+ *   say) stops, because the target may be the only complete copy of rows the source no longer has;
+ * - the row is marked verified, with the verified fingerprint, in one transaction right before the first source table
+ *   is dropped. From then on the target is the only complete copy and the source is a leftover. A rerun that finds the
+ *   source unchanged just finishes dropping it (unless the target lost rows since); one that finds the source
+ *   different stops, for the same reason;
  * - no row at all: two copies with rows and no record of either. The move stops before changing anything.
  *
- * The marker table is dropped last.
+ * The marker table may be shared by moves in both directions, so a move deletes only its own rows and drops the table
+ * once it is empty.
  *
  * When both connections turn out to be the same database nothing can be copied. SQLite refuses (the file is shared, so
  * the move would destroy it); other servers keep the tables where they are and only drop the foreign keys to tables of
@@ -158,7 +161,7 @@ final class TableMover
         $resumed = array_values(array_filter($tables, fn (MovedTable $table): bool => isset($plan['resume'][$table->name])));
 
         if ($toCopy === [] && $plan['create'] === [] && $emptied === [] && $resumed === []) {
-            $targetSchema->dropIfExists(self::MARKER_TABLE);
+            $this->removeMarkers($target, $tables);
 
             return false;
         }
@@ -171,8 +174,19 @@ final class TableMover
             ]);
         }
 
+        $unfinished = array_values(array_filter($emptied, fn (MovedTable $table): bool => in_array($table->name, $plan['unverified'], true)));
+
+        if ($unfinished !== []) {
+            Log::warning('A copy that was never verified is being kept because the old table is empty. It may be partial and may lack its secondary indexes.', [
+                'tables' => array_map(fn (MovedTable $table): string => $table->name, $unfinished),
+                'from' => $from,
+                'to' => $to,
+            ]);
+        }
+
         if ($toCopy !== []) {
             $this->assertEnoughDiskSpace($source, $from, $target, $to, $toCopy, $plan['dropTarget']);
+            $this->assertCanLockSource($source, $from, $toCopy[0]);
         }
 
         $work = array_values(array_filter(
@@ -180,7 +194,7 @@ final class TableMover
             fn (MovedTable $table): bool => in_array($table, $toCopy, true) || in_array($table, $plan['create'], true),
         ));
 
-        $this->writeMarker($targetSchema, $target, $work);
+        $this->writeMarker($targetSchema, $target, $work, $plan['fingerprints']);
 
         $sourceSchema->disableForeignKeyConstraints();
         $targetSchema->disableForeignKeyConstraints();
@@ -195,7 +209,7 @@ final class TableMover
                 $this->createTable($targetSchema, $table, $legacySchema, $target->getDriverName());
             }
 
-            $verified = $this->copyRows($toCopy, $source, $from, $target, $to);
+            $this->copyRows($toCopy, $source, $from, $target, $to);
 
             foreach ($work as $table) {
                 $targetSchema->table($table->name, fn (Blueprint $blueprint) => ($table->indexes)($blueprint, $legacySchema, $target->getDriverName()));
@@ -213,14 +227,14 @@ final class TableMover
             ));
 
             try {
-                $this->dropSourceTables($leaving, $toCopy, $emptied, [...$plan['resume'], ...$verified], $source, $target, $from, $to, $lock);
+                $this->dropSourceTables($leaving, $toCopy, $emptied, [...$plan['resume'], ...$plan['fingerprints']], $source, $target, $from, $to, $lock);
             } catch (SourceChangedDuringMove $exception) {
                 $this->discardCopy($target, $work);
 
                 throw $exception;
             }
 
-            $targetSchema->dropIfExists(self::MARKER_TABLE);
+            $this->removeMarkers($target, $tables);
         } finally {
             $sourceSchema->enableForeignKeyConstraints();
             $targetSchema->enableForeignKeyConstraints();
@@ -233,24 +247,31 @@ final class TableMover
      * Decide what happens to every table before anything is changed, and refuse when that cannot be decided safely.
      *
      * `resume` holds the tables whose source is a verified leftover of a move that crashed while dropping it, with the
-     * fingerprint recorded for each.
+     * fingerprint recorded for each. `fingerprints` holds the fingerprint of every source table about to be copied,
+     * taken before the target is touched. `unverified` names the tables whose marker row says their target copy was
+     * never verified.
      *
      * @param  list<MovedTable>  $tables
-     * @return array{copy: list<MovedTable>, create: list<MovedTable>, dropTarget: list<MovedTable>, emptySource: list<MovedTable>, resume: array<string, string>}
+     * @return array{copy: list<MovedTable>, create: list<MovedTable>, dropTarget: list<MovedTable>, emptySource: list<MovedTable>, resume: array<string, string>, fingerprints: array<string, string>, unverified: list<string>}
      */
     private function plan(array $tables, Connection $source, string $from, Connection $target, string $to): array
     {
         $sourceSchema = $source->getSchemaBuilder();
         $targetSchema = $target->getSchemaBuilder();
 
-        /** @var array<string, string|null> $markers */
-        $markers = $targetSchema->hasTable(self::MARKER_TABLE)
-            ? $target->table(self::MARKER_TABLE)->pluck('fingerprint', 'table_name')->all()
-            : [];
+        /** @var array<string, array{fingerprint: string|null, verified: bool}> $markers */
+        $markers = [];
 
-        $plan = ['copy' => [], 'create' => [], 'dropTarget' => [], 'emptySource' => [], 'resume' => []];
+        if ($targetSchema->hasTable(self::MARKER_TABLE)) {
+            foreach ($target->table(self::MARKER_TABLE)->get(['table_name', 'fingerprint', 'verified']) as $row) {
+                $markers[$row->table_name] = ['fingerprint' => $row->fingerprint, 'verified' => (bool) $row->verified];
+            }
+        }
+
+        $plan = ['copy' => [], 'create' => [], 'dropTarget' => [], 'emptySource' => [], 'resume' => [], 'fingerprints' => [], 'unverified' => []];
         $unmarked = [];
         $changed = [];
+        $shrunk = [];
 
         foreach ($tables as $table) {
             $inSource = $sourceSchema->hasTable($table->name);
@@ -260,42 +281,62 @@ final class TableMover
                 $plan['create'][] = $table;
             } elseif (! $inSource) {
                 continue;
-            } elseif (! $inTarget) {
-                $plan['copy'][] = $table;
             } elseif (! $source->table($table->name)->exists()) {
-                $targetHasRows = $target->table($table->name)->exists();
+                $targetHasRows = $inTarget && $target->table($table->name)->exists();
 
                 if ($targetHasRows) {
                     $plan['emptySource'][] = $table;
+
+                    if (isset($markers[$table->name]) && ! $markers[$table->name]['verified']) {
+                        $plan['unverified'][] = $table->name;
+                    }
                 } else {
                     $plan['copy'][] = $table;
+
+                    if ($inTarget) {
+                        $plan['dropTarget'][] = $table;
+                    }
+                }
+            } elseif (! $inTarget || ! $target->table($table->name)->exists()) {
+                $plan['copy'][] = $table;
+
+                if ($inTarget) {
                     $plan['dropTarget'][] = $table;
                 }
-            } elseif (! $target->table($table->name)->exists()) {
-                $plan['copy'][] = $table;
-                $plan['dropTarget'][] = $table;
             } elseif (! array_key_exists($table->name, $markers)) {
                 $unmarked[] = $table->name;
-            } elseif ($markers[$table->name] === null) {
-                $plan['copy'][] = $table;
-                $plan['dropTarget'][] = $table;
-            } elseif ($this->fingerprint($source, $table, $this->hasUpdatedAt($source, $table)) === $markers[$table->name]) {
-                $plan['resume'][$table->name] = $markers[$table->name];
             } else {
-                $changed[] = $table->name;
+                $fingerprint = $this->fingerprint($source, $table, $this->hasUpdatedAt($source, $table));
+
+                if ($fingerprint !== $markers[$table->name]['fingerprint']) {
+                    $changed[] = $table->name;
+                } elseif (! $markers[$table->name]['verified']) {
+                    $plan['copy'][] = $table;
+                    $plan['dropTarget'][] = $table;
+                    $plan['fingerprints'][$table->name] = $fingerprint;
+                } elseif ($target->table($table->name)->count() < $source->table($table->name)->count()) {
+                    $shrunk[] = $table->name;
+                } else {
+                    $plan['resume'][$table->name] = $fingerprint;
+                }
             }
         }
 
-        $this->assertNoConflict($unmarked, $changed, $from, $to);
+        $this->assertNoConflict($unmarked, $changed, $shrunk, $from, $to);
+
+        foreach ($plan['copy'] as $table) {
+            $plan['fingerprints'][$table->name] ??= $this->fingerprint($source, $table, $this->hasUpdatedAt($source, $table));
+        }
 
         return $plan;
     }
 
     /**
      * @param  list<string>  $unmarked  Tables with rows on both sides and no record of either.
-     * @param  list<string>  $changed  Tables whose source is no longer the one that was verified.
+     * @param  list<string>  $changed  Tables whose source is no longer the one that was recorded.
+     * @param  list<string>  $shrunk  Verified tables whose target has fewer rows than the source.
      */
-    private function assertNoConflict(array $unmarked, array $changed, string $from, string $to): void
+    private function assertNoConflict(array $unmarked, array $changed, array $shrunk, string $from, string $to): void
     {
         $reasons = [];
 
@@ -304,21 +345,51 @@ final class TableMover
         }
 
         if ($changed !== []) {
-            $reasons[] = sprintf('The rows in %s were already copied from [%s] to [%s] and verified, but [%s] holds different rows now (an older database restored, or rows written since?).', implode(', ', $changed), $from, $to, $from);
+            $reasons[] = sprintf('The rows in %s were already copied from [%s] to [%s], but [%s] holds different rows now (an older database restored, or rows written since?), so [%s] may hold rows that [%s] no longer has.', implode(', ', $changed), $from, $to, $from, $to, $from);
+        }
+
+        if ($shrunk !== []) {
+            $reasons[] = sprintf('The rows in %s were already copied from [%s] to [%s] and verified, but [%s] now holds fewer rows than [%s] (rows were removed from it).', implode(', ', $shrunk), $from, $to, $to, $from);
         }
 
         if ($reasons !== []) {
-            throw new RuntimeException(implode(' ', $reasons).' Nothing was changed. Stop the app, keep the database that has the data you want, empty or drop these tables in the other one, and run the migration again.');
+            throw new RuntimeException(sprintf(
+                '%s Nothing was changed. Stop the app and keep one whole database. To keep the old tables in [%s]: delete the [%s] database (for SQLite the file and its -wal and -shm files), then run the migration again. To keep the new tables in [%s]: restore the [%s] database from a backup taken after the move.',
+                implode(' ', $reasons),
+                $from,
+                $to,
+                $to,
+                $from,
+            ));
         }
     }
 
     /**
-     * Record the tables this run is about to (re)create in the target, so a rerun after a crash knows they are leftovers.
-     * Their fingerprint stays empty until the copy is verified.
+     * Fail before the copy when the database user cannot lock tables, which the final check and drop need on MySQL and
+     * MariaDB. Found out at the end it would fail every rerun after a full copy.
+     */
+    private function assertCanLockSource(Connection $source, string $from, MovedTable $table): void
+    {
+        if (! in_array($source->getDriverName(), ['mysql', 'mariadb'], true)) {
+            return;
+        }
+
+        try {
+            $source->unprepared('lock tables '.$source->getQueryGrammar()->wrap($table->name).' read');
+            $source->unprepared('unlock tables');
+        } catch (Throwable $exception) {
+            throw new RuntimeException("The database user of the [{$from}] connection cannot lock tables, which moving them needs (to stop writes while the copy is checked and the originals are dropped). Grant the LOCK TABLES privilege on the [{$from}] database (GRANT LOCK TABLES ON `{$source->getDatabaseName()}`.* TO the user), then run the migration again. Nothing was changed: ".$exception->getMessage(), previous: $exception);
+        }
+    }
+
+    /**
+     * Record the tables this run is about to (re)create in the target, so a rerun after a crash knows what they are
+     * leftovers of: the fingerprint of the source being copied (null when there is none), not yet verified.
      *
      * @param  list<MovedTable>  $work
+     * @param  array<string, string>  $fingerprints
      */
-    private function writeMarker(Builder $targetSchema, Connection $target, array $work): void
+    private function writeMarker(Builder $targetSchema, Connection $target, array $work, array $fingerprints): void
     {
         if ($work === []) {
             return;
@@ -328,14 +399,35 @@ final class TableMover
             $targetSchema->create(self::MARKER_TABLE, function (Blueprint $blueprint): void {
                 $blueprint->string('table_name')->primary();
                 $blueprint->text('fingerprint')->nullable();
+                $blueprint->boolean('verified')->default(false);
             });
         }
 
         $target->table(self::MARKER_TABLE)->upsert(
-            array_map(fn (MovedTable $table): array => ['table_name' => $table->name, 'fingerprint' => null], $work),
+            array_map(fn (MovedTable $table): array => ['table_name' => $table->name, 'fingerprint' => $fingerprints[$table->name] ?? null, 'verified' => false], $work),
             ['table_name'],
-            ['fingerprint'],
+            ['fingerprint', 'verified'],
         );
+    }
+
+    /**
+     * Delete this move's rows from the marker table, and drop the table once no other move has rows in it.
+     *
+     * @param  list<MovedTable>  $tables
+     */
+    private function removeMarkers(Connection $target, array $tables): void
+    {
+        $schema = $target->getSchemaBuilder();
+
+        if (! $schema->hasTable(self::MARKER_TABLE)) {
+            return;
+        }
+
+        $target->table(self::MARKER_TABLE)->whereIn('table_name', array_map(fn (MovedTable $table): string => $table->name, $tables))->delete();
+
+        if (! $target->table(self::MARKER_TABLE)->exists()) {
+            $schema->dropIfExists(self::MARKER_TABLE);
+        }
     }
 
     /**
@@ -354,13 +446,7 @@ final class TableMover
                 $schema->dropIfExists($table->name);
             }
 
-            if ($schema->hasTable(self::MARKER_TABLE)) {
-                $target->table(self::MARKER_TABLE)->whereIn('table_name', array_map(fn (MovedTable $table): string => $table->name, $work))->delete();
-
-                if (! $target->table(self::MARKER_TABLE)->exists()) {
-                    $schema->dropIfExists(self::MARKER_TABLE);
-                }
-            }
+            $this->removeMarkers($target, $work);
         } catch (Throwable) {
             // The next run treats whatever is left as a disposable copy.
         }
@@ -570,17 +656,14 @@ final class TableMover
     }
 
     /**
-     * Copy every table's rows and log what was done. Returns each table's fingerprint from just before its copy.
+     * Copy every table's rows and log what was done.
      *
      * @param  list<MovedTable>  $tables
-     * @return array<string, string>
      */
-    private function copyRows(array $tables, Connection $source, string $from, Connection $target, string $to): array
+    private function copyRows(array $tables, Connection $source, string $from, Connection $target, string $to): void
     {
-        $fingerprints = [];
-
         if ($tables === []) {
-            return $fingerprints;
+            return;
         }
 
         $targetPath = $this->forceGenericCopy || $source->getDriverName() !== 'sqlite' || $target->getDriverName() !== 'sqlite'
@@ -597,7 +680,6 @@ final class TableMover
             foreach ($tables as $table) {
                 $startedAt = microtime(true);
                 $columns = $this->copyColumns($table, $source->getSchemaBuilder(), $target->getSchemaBuilder());
-                $fingerprints[$table->name] = $this->fingerprint($source, $table, $this->hasUpdatedAt($source, $table));
 
                 $rows = $attached
                     ? $this->copyAttached($table, $source, $columns)
@@ -617,12 +699,11 @@ final class TableMover
             }
         }
 
-        return $fingerprints;
     }
 
     /**
      * A cheap summary of a table that changes when most writes happen: the row count and the highest `id`, `updated_at`
-     * and (SQLite) rowid, as JSON. It is not a checksum. It misses an update that leaves `updated_at` alone, and a delete
+     * and (SQLite) rowid, hashed from the values as the driver returned them. It is not a checksum of the rows. It misses an update that leaves `updated_at` alone, and a delete
      * followed by an insert that restores the same maximums, so it narrows the doubt without removing it.
      */
     private function fingerprint(Connection $connection, MovedTable $table, bool $withUpdatedAt): string
@@ -638,7 +719,7 @@ final class TableMover
             $selects[] = 'max(rowid) as max_rowid';
         }
 
-        return (string) json_encode((array) $connection->table($table->name)->selectRaw(implode(', ', $selects))->first());
+        return md5(serialize((array) $connection->table($table->name)->selectRaw(implode(', ', $selects))->first()));
     }
 
     /**
@@ -889,7 +970,7 @@ final class TableMover
     }
 
     /**
-     * Mark the copied tables as verified, which makes the target authoritative.
+     * Mark the copied tables as verified, with the fingerprint just verified, which makes the target authoritative.
      *
      * @param  list<MovedTable>  $copied
      * @param  array<string, string>  $expected
@@ -902,7 +983,7 @@ final class TableMover
 
         $target->transaction(function () use ($target, $copied, $expected): void {
             foreach ($copied as $table) {
-                $target->table(self::MARKER_TABLE)->where('table_name', $table->name)->update(['fingerprint' => $expected[$table->name]]);
+                $target->table(self::MARKER_TABLE)->where('table_name', $table->name)->update(['fingerprint' => $expected[$table->name], 'verified' => true]);
             }
         });
     }

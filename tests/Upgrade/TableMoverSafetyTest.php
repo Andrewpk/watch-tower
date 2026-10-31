@@ -1,12 +1,17 @@
 <?php
 
 use App\Watch\Databases;
+use App\Watch\MovedTable;
 use App\Watch\MoveLock;
 use App\Watch\SourceChangedDuringMove;
 use App\Watch\TableMover;
+use Illuminate\Database\Connection;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Database\Query\Grammars\Grammar;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Mockery\MockInterface;
 use Tests\Upgrade\Support\SplitUpgrade;
 
 /**
@@ -66,6 +71,16 @@ function markerRows(): array
     return DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->pluck('fingerprint', 'table_name')->all();
 }
 
+/**
+ * Whether each marker row has been verified, by table name.
+ *
+ * @return array<string, bool>
+ */
+function markerVerified(): array
+{
+    return array_map(boolval(...), DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->pluck('verified', 'table_name')->all());
+}
+
 describe('after the target became the only copy', function () {
     it('keeps the target when the app database is replaced by an empty one', function () {
         $this->upgrade->legacy()->seed();
@@ -78,7 +93,8 @@ describe('after the target became the only copy', function () {
 
         expect(Schema::connection('sqlite')->hasTable('traces'))->toBeFalse()
             ->and(markerRows())->toHaveCount(count(Databases::TELEMETRY_TABLES))
-            ->and(array_filter(markerRows(), fn (?string $fingerprint): bool => $fingerprint === null))->toBe([]);
+            ->and(array_filter(markerRows(), fn (?string $fingerprint): bool => $fingerprint === null))->toBe([])
+            ->and(array_filter(markerVerified()))->toHaveCount(count(Databases::TELEMETRY_TABLES));
 
         $this->upgrade->replaceAppDatabaseWithEmptyLegacy();
 
@@ -120,7 +136,8 @@ describe('after the target became the only copy', function () {
             $message = $exception->getMessage();
         }
 
-        expect($message)->toContain('already copied', 'Nothing was changed')
+        expect($message)->toContain('already copied', 'Nothing was changed', 'delete the [telemetry] database', '-wal and -shm', 'restore the [sqlite] database from a backup taken after the move')
+            ->and($message)->not->toContain('empty')
             ->and($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($olderSource)
             ->and(telemetryRows($this->upgrade, Databases::TELEMETRY))->toEqual($before)
             ->and(markerRows())->toEqual($marker);
@@ -160,6 +177,237 @@ describe('after the target became the only copy', function () {
             ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before)
             ->and(array_intersect($this->upgrade->tables('sqlite'), [...Databases::TELEMETRY_TABLES, ...Databases::LOG_TABLES]))->toBe([])
             ->and($this->upgrade->tables(Databases::TELEMETRY))->not->toContain(TableMover::MARKER_TABLE);
+    });
+});
+
+describe('before the target was verified', function () {
+    /**
+     * Crash after the copy and before the check, leaving unverified marker rows that record the 25 row source.
+     */
+    function crashBeforeVerification(SplitUpgrade $upgrade): void
+    {
+        $upgrade->useSmallChunks(afterCopy: fn () => throw new RuntimeException('simulated crash'));
+
+        expect(fn () => $upgrade->migrate())->toThrow(RuntimeException::class, 'simulated crash');
+
+        $upgrade->useSmallChunks();
+    }
+
+    it('records the source and leaves the rows unverified', function () {
+        $this->upgrade->legacy()->seed();
+        crashBeforeVerification($this->upgrade);
+
+        expect(array_filter(markerRows()))->toHaveCount(count(Databases::TELEMETRY_TABLES))
+            ->and(array_filter(markerVerified()))->toBe([]);
+    });
+
+    it('refuses an older source with different rows, changing nothing', function () {
+        $this->upgrade->legacy()->seed();
+        $before = telemetryRows($this->upgrade, 'sqlite');
+        crashBeforeVerification($this->upgrade);
+
+        $this->upgrade->replaceAppDatabaseWithEmptyLegacy()->seed(10);
+        $olderSource = $this->upgrade->snapshot('sqlite', 'sqlite');
+        $marker = markerRows();
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'Nothing was changed')
+            ->and($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($olderSource)
+            ->and(telemetryRows($this->upgrade, Databases::TELEMETRY))->toEqual($before)
+            ->and(markerRows())->toEqual($marker);
+    });
+
+    it('refuses a new one row source, keeping the target', function () {
+        $this->upgrade->legacy()->seed();
+        $before = telemetryRows($this->upgrade, 'sqlite');
+        crashBeforeVerification($this->upgrade);
+
+        $this->upgrade->replaceAppDatabaseWithEmptyLegacy()->seed(1);
+        $newSource = $this->upgrade->snapshot('sqlite', 'sqlite');
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'Nothing was changed')
+            ->and($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($newSource)
+            ->and(telemetryRows($this->upgrade, Databases::TELEMETRY))->toEqual($before);
+    });
+
+    it('copies again and finishes when the source is unchanged', function () {
+        $this->upgrade->legacy()->seed();
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        crashBeforeVerification($this->upgrade);
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and($this->upgrade->snapshot(Databases::TELEMETRY, Databases::LOGS))->toEqual($before)
+            ->and($this->upgrade->tables(Databases::TELEMETRY))->not->toContain(TableMover::MARKER_TABLE);
+    });
+
+    it('warns that a kept copy may be partial when the source is empty', function () {
+        $this->upgrade->legacy()->seed();
+        $before = telemetryRows($this->upgrade, 'sqlite');
+        crashBeforeVerification($this->upgrade);
+        $this->upgrade->replaceAppDatabaseWithEmptyLegacy();
+        Log::spy();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and(telemetryRows($this->upgrade, Databases::TELEMETRY))->toEqual($before);
+
+        Log::shouldHaveReceived('warning')->with(
+            Mockery::pattern('/never verified.*partial.*secondary indexes/'),
+            Mockery::on(fn (array $context): bool => in_array('traces', $context['tables'], true)),
+        )->once();
+    });
+});
+
+describe('resuming a verified move', function () {
+    it('refuses when a target table lost rows since, leaving the source whole', function () {
+        $this->upgrade->legacy()->seed();
+        DB::statement('pragma wal_checkpoint(truncate)');
+        copy($this->upgrade->path('app'), $backup = $this->upgrade->directory.'/app-backup.sqlite');
+        $before = $this->upgrade->snapshot('sqlite', 'sqlite');
+        $crash = crashAfterSourceDrop();
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'simulated crash');
+
+        $crash->armed = false;
+        $this->upgrade->purge();
+
+        foreach (['', '-wal', '-shm'] as $suffix) {
+            @unlink($this->upgrade->path('app').$suffix);
+        }
+
+        copy($backup, $this->upgrade->path('app'));
+        DB::connection(Databases::TELEMETRY)->table('cache_events')->orderBy('id')->limit(3)->delete();
+        $this->upgrade->useSmallChunks();
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'fewer rows')
+            ->and($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($before)
+            ->and(DB::connection(Databases::TELEMETRY)->table('cache_events')->count())->toBe($this->upgrade->rows - 3);
+    });
+
+    it('finishes when the target holds more rows than the source', function () {
+        $this->upgrade->legacy()->seed();
+        DB::statement('pragma wal_checkpoint(truncate)');
+        copy($this->upgrade->path('app'), $backup = $this->upgrade->directory.'/app-backup.sqlite');
+        $crash = crashAfterSourceDrop();
+
+        expect(fn () => $this->upgrade->migrate())->toThrow(RuntimeException::class, 'simulated crash');
+
+        $crash->armed = false;
+        $this->upgrade->purge();
+
+        foreach (['', '-wal', '-shm'] as $suffix) {
+            @unlink($this->upgrade->path('app').$suffix);
+        }
+
+        copy($backup, $this->upgrade->path('app'));
+        $row = (array) DB::connection(Databases::TELEMETRY)->table('end_users')->first();
+        unset($row['seq']);
+        DB::connection(Databases::TELEMETRY)->table('end_users')->insert([...$row, 'id' => 'written-after-upgrade', 'identifier' => 'late']);
+        $this->upgrade->useSmallChunks();
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and(DB::connection(Databases::TELEMETRY)->table('end_users')->count())->toBe($this->upgrade->rows + 1)
+            ->and(array_intersect($this->upgrade->tables('sqlite'), Databases::TELEMETRY_TABLES))->toBe([]);
+    });
+});
+
+describe('sharing the marker table with another move', function () {
+    /**
+     * A marker row of a move that this one knows nothing about.
+     */
+    function addForeignMarker(SplitUpgrade $upgrade): void
+    {
+        touch($upgrade->path('telemetry'));
+        $schema = Schema::connection(Databases::TELEMETRY);
+
+        if (! $schema->hasTable(TableMover::MARKER_TABLE)) {
+            $schema->create(TableMover::MARKER_TABLE, function ($table): void {
+                $table->string('table_name')->primary();
+                $table->text('fingerprint')->nullable();
+                $table->boolean('verified')->default(false);
+            });
+        }
+
+        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->insert(['table_name' => 'another_moves_table', 'fingerprint' => 'abc', 'verified' => false]);
+    }
+
+    it('deletes only its own rows when it finishes', function () {
+        $this->upgrade->legacy()->seed();
+        addForeignMarker($this->upgrade);
+
+        expect($this->upgrade->migrate())->toBe(0)
+            ->and(markerRows())->toBe(['another_moves_table' => 'abc']);
+    });
+
+    it('deletes only its own rows when it has nothing left to move', function () {
+        $this->upgrade->legacy()->seed();
+        $this->upgrade->migrate();
+        addForeignMarker($this->upgrade);
+        DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->insert(['table_name' => 'traces', 'fingerprint' => 'x', 'verified' => true]);
+
+        $this->upgrade->splitMigration('telemetry')->up();
+
+        expect(markerRows())->toBe(['another_moves_table' => 'abc']);
+    });
+});
+
+describe('checking the privilege to lock tables', function () {
+    /**
+     * @return array{0: Connection&MockInterface, 1: MovedTable}
+     */
+    function fakeMoverSourceConnection(string $driver): array
+    {
+        $connection = Mockery::mock(Connection::class);
+        $grammar = Mockery::mock(Grammar::class);
+        $grammar->shouldReceive('wrap')->andReturnUsing(fn (string $name): string => "`{$name}`");
+        $connection->shouldReceive('getDriverName')->andReturn($driver);
+        $connection->shouldReceive('getQueryGrammar')->andReturn($grammar);
+        $connection->shouldReceive('getDatabaseName')->andReturn('watch');
+
+        return [$connection, new MovedTable('traces', fn () => null, fn () => null)];
+    }
+
+    function assertMoverCanLockSource(Connection $connection, MovedTable $table): void
+    {
+        (new ReflectionMethod(TableMover::class, 'assertCanLockSource'))->invoke(new TableMover, $connection, 'mysql', $table);
+    }
+
+    it('read locks the first table to copy and unlocks it again', function () {
+        [$connection, $table] = fakeMoverSourceConnection('mysql');
+        $connection->shouldReceive('unprepared')->once()->ordered()->with('lock tables `traces` read');
+        $connection->shouldReceive('unprepared')->once()->ordered()->with('unlock tables');
+
+        assertMoverCanLockSource($connection, $table);
+    });
+
+    it('names the grant when the lock is refused', function () {
+        [$connection, $table] = fakeMoverSourceConnection('mariadb');
+        $connection->shouldReceive('unprepared')->once()->with('lock tables `traces` read')->andThrow(new RuntimeException('Access denied for user'));
+
+        expect(fn () => assertMoverCanLockSource($connection, $table))
+            ->toThrow(RuntimeException::class, 'LOCK TABLES');
+    });
+
+    it('does nothing on SQLite', function () {
+        [$connection, $table] = fakeMoverSourceConnection('sqlite');
+        $connection->shouldNotReceive('unprepared');
+
+        assertMoverCanLockSource($connection, $table);
+    });
+});
+
+describe('fingerprinting a table', function () {
+    it('tells two sources apart even when their ids are not valid UTF-8', function () {
+        $this->upgrade->legacy();
+        Schema::connection('sqlite')->create('fingerprint_probe', fn ($table) => $table->string('id')->primary());
+        $fingerprint = fn (): string => (new ReflectionMethod(TableMover::class, 'fingerprint'))
+            ->invoke(new TableMover, DB::connection('sqlite'), new MovedTable('fingerprint_probe', fn () => null, fn () => null), false);
+
+        DB::table('fingerprint_probe')->insert(['id' => "\xff"]);
+        $first = $fingerprint();
+        DB::table('fingerprint_probe')->delete();
+        DB::table('fingerprint_probe')->insert(['id' => "\xfe"]);
+
+        expect($fingerprint())->not->toBe($first)
+            ->and($first)->not->toBe('');
     });
 });
 
