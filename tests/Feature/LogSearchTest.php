@@ -149,6 +149,15 @@ describe('searching on SQLite', function () {
             ->and(LogEntry::query()->searchMessage('abc', true)->toSql())->toContain('log_entries_fts');
     });
 
+    it('falls back to LIKE for a term with a NUL byte, which FTS5 rejects', function () {
+        logEntry($this->project, "nul\0byte here");
+        logEntry($this->project, 'Payment failed');
+
+        expect(LogEntry::query()->searchMessage("nul\0byte", true)->toSql())->not->toContain('log_entries_fts')
+            ->and(searchMessages("nul\0byte"))->toBe(["nul\0byte here"])
+            ->and(searchMessages("pay\0ment"))->toBe([]);
+    });
+
     it('can be chained with other conditions and keeps the table qualified', function () {
         logEntry($this->project, 'Payment failed', ['level' => 'error']);
         logEntry($this->project, 'Payment ok');
@@ -320,6 +329,16 @@ describe('the log page filters', function () {
             ->and(paginatedLogs($this->project, 'ul')['total'])->toBe(2);
     });
 
+    it('answers a search containing a NUL byte over HTTP instead of failing', function () {
+        $this->withoutVite();
+        $this->actingAs(User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]));
+        logEntry($this->project, 'Payment failed');
+
+        $this->get(route('projects.logs.index', ['project' => $this->project->slug, 'range' => '24h', 'search' => "pay\0ment"]))
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page->where('logs.total', 0));
+    });
+
     it('serves the page over HTTP', function () {
         $this->withoutVite();
         $this->actingAs(User::factory()->create(['role' => User::ROLE_SUPER_ADMIN]));
@@ -436,8 +455,25 @@ describe('searching on MySQL', function () {
             ->and($query->getBindings())->toBe(['"payment"', '%payment%']);
     });
 
-    it('drops double quotes, which cannot be escaped inside a boolean phrase, and escapes LIKE wildcards', function () {
-        expect(mysqlSearch('50%_"done"!')->getBindings())->toBe(['"50%_done!"', '%50!%!_"done"!!%']);
+    it('escapes LIKE wildcards', function () {
+        expect(mysqlSearch('50%_done!')->getBindings())->toBe(['"50%_done!"', '%50!%!_done!!%']);
+    });
+
+    it('uses LIKE for a term with a double quote, which cannot be escaped inside a boolean phrase', function () {
+        $query = mysqlSearch('say "done"');
+
+        expect($query->toSql())->not->toContain('match')
+            ->and($query->getBindings())->toBe(['%say "done"%']);
+    });
+
+    it('uses LIKE for a term without three consecutive letters or digits, which the ngram parser would drop', function () {
+        foreach (['a-b-c', '1.2.3', '[] {}', 'ab !!', '_ _ _'] as $term) {
+            expect(mysqlSearch($term)->toSql())->not->toContain('match');
+        }
+
+        foreach (['a-bcd', 'x 123 y', 'été'] as $term) {
+            expect(mysqlSearch($term)->toSql())->toContain('match');
+        }
     });
 
     it('falls back to LIKE for terms shorter than the ngram size', function () {

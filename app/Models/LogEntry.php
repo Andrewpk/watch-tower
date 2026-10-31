@@ -67,7 +67,8 @@ class LogEntry extends Model
      * with LIKE is faster than asking the index for every match in the table, so only a larger set goes through the
      * index: the SQLite FTS5 trigram table, or the MySQL ngram FULLTEXT index, which only narrows the candidates, so a
      * final LIKE keeps the result an exact substring match. Terms shorter than
-     * {@see MINIMUM_INDEXED_SEARCH_LENGTH} characters and other databases always use LIKE. Both paths return the same
+     * {@see MINIMUM_INDEXED_SEARCH_LENGTH} characters, terms the index cannot express (see {@see canUseIndex()}) and other
+     * databases always use LIKE. Both paths return the same
      * rows and search the term as literal text (`%`, `_` and the escape character are escaped), with one exception:
      * SQLite's LIKE only folds the case of ASCII letters, while the trigram index folds all of Unicode.
      *
@@ -80,7 +81,7 @@ class LogEntry extends Model
         $driver = $query->getConnection()->getDriverName();
 
         if (in_array($driver, ['sqlite', 'mysql'], true)
-            && mb_strlen($term) >= self::MINIMUM_INDEXED_SEARCH_LENGTH
+            && $this->canUseIndex($driver, $term)
             && ($useIndex ?? $this->hasManyCandidates($query))) {
             if ($driver === 'sqlite') {
                 $query->whereIn($query->qualifyColumn('seq'), function ($subquery) use ($term): void {
@@ -98,6 +99,23 @@ class LogEntry extends Model
         $escaped = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
 
         $query->whereRaw($query->getGrammar()->wrap($query->qualifyColumn('message'))." like ? escape '!'", ['%'.$escaped.'%']);
+    }
+
+    /**
+     * Whether the full-text index can answer a search for the term.
+     *
+     * SQLite's FTS5 fails on a NUL byte ("unterminated string"). MySQL's boolean mode cannot quote a double quote, and
+     * a term without a run of {@see MINIMUM_INDEXED_SEARCH_LENGTH} letters or digits is dropped by the ngram parser
+     * (punctuation separates tokens), which would match nothing.
+     */
+    private function canUseIndex(string $driver, string $term): bool
+    {
+        if (mb_strlen($term) < self::MINIMUM_INDEXED_SEARCH_LENGTH || str_contains($term, "\0")) {
+            return false;
+        }
+
+        return $driver !== 'mysql'
+            || (! str_contains($term, '"') && preg_match('/[\p{L}\p{N}]{'.self::MINIMUM_INDEXED_SEARCH_LENGTH.'}/u', $term) === 1);
     }
 
     /**
