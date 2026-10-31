@@ -139,7 +139,7 @@ final class Databases
 
         if ($firstConfig['driver'] === 'sqlite') {
             return ! self::isInMemory($first) && ! self::isInMemory($second)
-                && ($firstConfig === $secondConfig || self::sameFile($firstConfig['database'], $secondConfig['database']));
+                && self::sameFile(self::openedSqliteFile($first, $firstConfig), self::openedSqliteFile($second, $secondConfig));
         }
 
         if ($firstConfig === $secondConfig) {
@@ -150,28 +150,54 @@ final class Databases
     }
 
     /**
+     * A connection's configuration with its `url` expanded, the way the connection factory reads it. Reading the raw
+     * config would compare settings the URL overrides.
+     *
+     * @return array<string, mixed>
+     */
+    private static function resolvedConfig(string $connection): array
+    {
+        $config = config("database.connections.{$connection}");
+        $config = is_array($config) ? $config : [];
+
+        try {
+            return (new ConfigurationUrlParser)->parseConfiguration($config);
+        } catch (Throwable) {
+            return $config;
+        }
+    }
+
+    /**
      * The settings that decide which database a connection opens.
      *
      * @return array{driver: mixed, host: mixed, port: mixed, database: mixed, unix_socket: mixed}
      */
     private static function identity(string $connection): array
     {
-        $config = config("database.connections.{$connection}");
-        $config = is_array($config) ? $config : [];
-        $driver = $config['driver'] ?? null;
-        $database = $config['database'] ?? null;
-
-        if ($driver === 'sqlite' && is_string($database) && $database !== '') {
-            $database = realpath($database) ?: $database;
-        }
+        $config = self::resolvedConfig($connection);
 
         return [
-            'driver' => $driver,
+            'driver' => $config['driver'] ?? null,
             'host' => $config['host'] ?? null,
             'port' => isset($config['port']) ? (string) $config['port'] : null,
-            'database' => $database,
+            'database' => $config['database'] ?? null,
             'unix_socket' => ($config['unix_socket'] ?? null) ?: null,
         ];
+    }
+
+    /**
+     * The file a SQLite connection opens: what the connection reports when it can be opened, otherwise the path its
+     * settings name.
+     *
+     * @param  array{database: mixed}  $identity
+     */
+    private static function openedSqliteFile(string $connection, array $identity): mixed
+    {
+        try {
+            return self::sqlitePath($connection) ?? $identity['database'];
+        } catch (Throwable) {
+            return $identity['database'];
+        }
     }
 
     /**
@@ -179,7 +205,7 @@ final class Databases
      */
     private static function isInMemory(string $connection): bool
     {
-        $path = config("database.connections.{$connection}.database");
+        $path = self::resolvedConfig($connection)['database'] ?? null;
 
         return ! is_string($path) || $path === '' || $path === ':memory:' || str_contains($path, 'mode=memory');
     }
@@ -214,7 +240,11 @@ final class Databases
         } catch (Throwable $exception) {
             throw new RuntimeException("Cannot tell whether the [{$first}] and [{$second}] connections are the same database, so nothing was changed: ".$exception->getMessage(), previous: $exception);
         } finally {
-            $schema->dropIfExists($name);
+            try {
+                $schema->dropIfExists($name);
+            } catch (Throwable) {
+                // An unreachable server already failed above with a clearer message.
+            }
         }
     }
 
@@ -225,9 +255,9 @@ final class Databases
      */
     public static function ensureSqliteFileExists(string $connection): void
     {
-        $config = config("database.connections.{$connection}");
+        $config = self::resolvedConfig($connection);
 
-        if (! is_array($config) || ($config['driver'] ?? null) !== 'sqlite') {
+        if (($config['driver'] ?? null) !== 'sqlite') {
             return;
         }
 

@@ -231,6 +231,22 @@ describe('comparing SQLite databases', function () {
         expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
     });
 
+    it('reads the file from the url of a connection, which overrides its database setting', function () {
+        config([
+            'database.connections.alias' => [...baseSqliteConnection("{$this->directory}/two.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/one.sqlite'],
+        ]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
+    });
+
+    it('tells a url that points at another file apart from a config that names the same one', function () {
+        config([
+            'database.connections.alias' => [...baseSqliteConnection("{$this->directory}/one.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/two.sqlite'],
+        ]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeFalse();
+    });
+
     it('never treats in-memory databases as shared', function () {
         config([
             'database.connections.one' => baseSqliteConnection(':memory:'),
@@ -246,6 +262,25 @@ describe('comparing server connections', function () {
         config([
             'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
             'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'username' => 'someone else']),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeTrue();
+    });
+
+    it('uses the url of a connection, so a url to another server is not mistaken for the first one', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'url' => 'mysql://app:secret@elsewhere.invalid:3306/watch']),
+        ]);
+
+        // Different servers cannot be settled from the settings alone, so the probe runs and fails on the unreachable host.
+        expect(fn () => Databases::sameDatabase('first', 'second'))->toThrow(RuntimeException::class, 'Cannot tell whether');
+    });
+
+    it('recognises a url that names the same server as the other connection without touching it', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['url' => 'mysql://other:pw@unreachable.invalid:3306/watch']),
         ]);
 
         expect(Databases::sameDatabase('first', 'second'))->toBeTrue();
@@ -313,6 +348,15 @@ describe('creating SQLite files', function () {
         Databases::ensureSqliteFileExists('fresh');
 
         expect(file_exists("{$this->directory}/nested/fresh.sqlite"))->toBeTrue();
+    });
+
+    it('creates the file a url names, not the one in the database setting', function () {
+        config(['database.connections.fresh' => [...baseSqliteConnection("{$this->directory}/ignored.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/from-url.sqlite']]);
+
+        Databases::ensureSqliteFileExists('fresh');
+
+        expect(file_exists("{$this->directory}/from-url.sqlite"))->toBeTrue()
+            ->and(file_exists("{$this->directory}/ignored.sqlite"))->toBeFalse();
     });
 
     it('leaves an existing file alone', function () {
