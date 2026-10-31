@@ -71,19 +71,28 @@ Restore all three files from the same backup.
 
 ### Upgrading from a single database
 
-The first start of this version moves telemetry and logs out of `database.sqlite` into the two new files, then builds the log search index. It copies the data, checks the row counts, and only then drops the old tables, so a crash or restart part way through is safe: the next run starts the move again.
+This version moves telemetry and logs out of the app database when its migrations run, then builds the log search index. It copies the data, compares it with the original, and only then drops the old tables. A crash or restart part way through is safe: the next run starts the move again.
 
-- **Disk space.** The move needs free space about the size of your current `database.sqlite`, plus about 1.5 times the size of your logs for the search index. Both steps check first and stop with an error, before changing anything, if there isn't enough.
-- **Time.** Seconds for a small database, minutes for several GB. The web server starts after the migrations finish.
-- **Large databases.** On a platform that replaces containers that fail a health check (Docker Swarm, for example), a long move can be cut off and restarted. Run it once before you switch over, with the new image and your usual environment and volume:
+1. **Back up** `storage/database/`, or your MySQL database. See [Backups](#backups).
+2. **Stop every container that runs the old version**, including workers and schedulers. Anything still writing during the move can make it stop with an error and leave the data in the old tables.
+3. **MySQL with separate databases only:** set `DB_TELEMETRY_*` and `DB_LOGS_*` now. The move runs once.
+4. **Run the migrations once**, with the new image and your usual environment and volume:
 
-  ```bash
-  docker run --rm --env-file watch-tower.env \
-    -v watch-tower-storage:/var/www/html/storage \
-    ghcr.io/andrewpk/watch-tower:<new-version> php artisan migrate --force
-  ```
+   ```bash
+   docker run --rm --env-file watch-tower.env \
+     -v watch-tower-storage:/var/www/html/storage \
+     ghcr.io/andrewpk/watch-tower:<new-version> php artisan migrate --force
+   ```
 
-  Stop the old containers first, so nothing writes to the database during the move.
+5. **Start the new version** as usual.
+
+For a small install you can skip step 4 and let `AUTORUN_ENABLED=true` do it on start. Don't do that on a large database on a platform that replaces containers that fail a health check, such as Docker Swarm: the web server only starts after the migrations finish, so a long move can be cut off and start over.
+
+- **Disk space (SQLite).** The move needs free space about the size of your current `database.sqlite`, plus about 1.5 times the size of your logs for the search index. Both steps check first and stop with an error, before changing anything, if there isn't enough.
+- **Time.** Seconds for a small database, minutes for several GB.
+- **Several containers at once.** If two containers run the migrations together, the second waits for the first, then finds nothing left to do.
+- **MySQL.** With the default settings nothing is copied: the tables stay in the one database and only their foreign keys to `users` and `projects` are dropped. The search index is the slow part: adding it rebuilds `log_entries` and blocks writes to that table, so do it in a maintenance window if the table is large. It needs free disk about the size of the table. Deleted rows stay in the index until you run `OPTIMIZE TABLE log_entries`.
+- **Both databases hold data.** If the old tables and the new database both hold rows, for example after restoring an old backup of only `database.sqlite`, the migration stops with an error and changes nothing. Restore all three files from the same backup.
 
 ## Run
 

@@ -273,6 +273,14 @@ it('creates the telemetry and logs SQLite files where their settings point', fun
     ]);
 });
 
+it('does not create a file for an in-memory telemetry or logs database', function () {
+    expect(runStorageScript([
+        'DB_DATABASE' => '{root}/storage/database/database.sqlite',
+        'DB_TELEMETRY_DATABASE' => ':memory:',
+        'DB_LOGS_DATABASE' => ':memory:',
+    ]))->toBe(['{root}/storage/database/database.sqlite']);
+});
+
 it('creates no SQLite files for MySQL', function () {
     expect(runStorageScript([
         'DB_CONNECTION' => 'mysql',

@@ -103,6 +103,7 @@ prepare_storage() {
             "$DB_DATABASE" \
             "${DB_TELEMETRY_DATABASE:-$watch_tower_db_dir/telemetry.sqlite}" \
             "${DB_LOGS_DATABASE:-$watch_tower_db_dir/logs.sqlite}"; do
+            [ "$watch_tower_db" = ":memory:" ] && continue
             mkdir -p "$(dirname "$watch_tower_db")" && touch "$watch_tower_db" || return 1
         done
     fi

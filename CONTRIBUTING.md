@@ -66,6 +66,8 @@ A migration that changes a telemetry or log table must:
 
 `tests/Unit/CrossDatabaseRulesTest.php` checks the first two.
 
+Never write to `log_entries` with `INSERT OR REPLACE`. The replaced row's delete trigger does not fire, which corrupts the search index.
+
 ## Branches and commits
 
 Branch from `main` and name the branch `<type>/<issue-number>-<short-slug>`, for example `fix/11-test-suite` or `feat/35-release-image`.
