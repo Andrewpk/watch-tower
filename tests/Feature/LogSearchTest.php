@@ -476,6 +476,14 @@ describe('searching on MySQL', function () {
         }
     });
 
+    it('uses LIKE for a term with a symbol, which the ngram parser does not index', function () {
+        foreach (['abc😀def', 'a=bcd', 'total+tax', 'price$100', 'x|yz abc', 'a<b>cd'] as $term) {
+            expect(mysqlSearch($term)->toSql())->not->toContain('match');
+        }
+
+        expect(mysqlSearch('user@example')->toSql())->toContain('match');
+    });
+
     it('falls back to LIKE for terms shorter than the ngram size', function () {
         $query = mysqlSearch('ab');
 

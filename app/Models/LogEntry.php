@@ -104,8 +104,9 @@ class LogEntry extends Model
     /**
      * Whether the full-text index can answer a search for the term.
      *
-     * SQLite's FTS5 fails on a NUL byte ("unterminated string"). MySQL's boolean mode cannot quote a double quote. The
-     * ngram parser splits a term at spaces and punctuation and cannot tokenize a fragment shorter than
+     * SQLite's FTS5 fails on a NUL byte ("unterminated string"). MySQL's boolean mode cannot quote a double quote, and
+     * the ngram parser does not index symbols (emoji, `=`, `+`, `$`), so `abc😀def` misses a row that LIKE finds. The
+     * ngram parser also splits a term at spaces and punctuation and cannot tokenize a fragment shorter than
      * `ngram_token_size`, and a phrase with such a fragment matches nothing: `t failed f` and `?page=2` miss rows that
      * LIKE finds. So every fragment must have {@see MINIMUM_INDEXED_SEARCH_LENGTH} letters or digits, which also holds
      * for a server that sets `ngram_token_size` to 3.
@@ -120,7 +121,7 @@ class LogEntry extends Model
             return true;
         }
 
-        if (str_contains($term, '"')) {
+        if (str_contains($term, '"') || preg_match('/\p{S}/u', $term) === 1) {
             return false;
         }
 
