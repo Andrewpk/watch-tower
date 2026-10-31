@@ -456,7 +456,7 @@ describe('searching on MySQL', function () {
     });
 
     it('escapes LIKE wildcards', function () {
-        expect(mysqlSearch('50%_done!')->getBindings())->toBe(['"50%_done!"', '%50!%!_done!!%']);
+        expect(mysqlSearch('500%_done!')->getBindings())->toBe(['"500%_done!"', '%500!%!_done!!%']);
     });
 
     it('uses LIKE for a term with a double quote, which cannot be escaped inside a boolean phrase', function () {
@@ -466,12 +466,12 @@ describe('searching on MySQL', function () {
             ->and($query->getBindings())->toBe(['%say "done"%']);
     });
 
-    it('uses LIKE for a term without three consecutive letters or digits, which the ngram parser would drop', function () {
-        foreach (['a-b-c', '1.2.3', '[] {}', 'ab !!', '_ _ _'] as $term) {
+    it('uses LIKE for a term with a fragment the ngram parser cannot tokenize, because the phrase would match nothing', function () {
+        foreach (['a-b-c', '1.2.3', '[] {}', 'ab !!', '_ _ _', 't failed f', '/api/users?page=2', 'a-bcd', 'x 123 y', 'done_ok'] as $term) {
             expect(mysqlSearch($term)->toSql())->not->toContain('match');
         }
 
-        foreach (['a-bcd', 'x 123 y', 'été'] as $term) {
+        foreach (['failed for', '/api/users', 'user@example', '-bar', 'été', 'NEAR('] as $term) {
             expect(mysqlSearch($term)->toSql())->toContain('match');
         }
     });

@@ -104,9 +104,11 @@ class LogEntry extends Model
     /**
      * Whether the full-text index can answer a search for the term.
      *
-     * SQLite's FTS5 fails on a NUL byte ("unterminated string"). MySQL's boolean mode cannot quote a double quote, and
-     * a term without a run of {@see MINIMUM_INDEXED_SEARCH_LENGTH} letters or digits is dropped by the ngram parser
-     * (punctuation separates tokens), which would match nothing.
+     * SQLite's FTS5 fails on a NUL byte ("unterminated string"). MySQL's boolean mode cannot quote a double quote. The
+     * ngram parser splits a term at spaces and punctuation and cannot tokenize a fragment shorter than
+     * `ngram_token_size`, and a phrase with such a fragment matches nothing: `t failed f` and `?page=2` miss rows that
+     * LIKE finds. So every fragment must have {@see MINIMUM_INDEXED_SEARCH_LENGTH} letters or digits, which also holds
+     * for a server that sets `ngram_token_size` to 3.
      */
     private function canUseIndex(string $driver, string $term): bool
     {
@@ -114,8 +116,18 @@ class LogEntry extends Model
             return false;
         }
 
-        return $driver !== 'mysql'
-            || (! str_contains($term, '"') && preg_match('/[\p{L}\p{N}]{'.self::MINIMUM_INDEXED_SEARCH_LENGTH.'}/u', $term) === 1);
+        if ($driver !== 'mysql') {
+            return true;
+        }
+
+        if (str_contains($term, '"')) {
+            return false;
+        }
+
+        $fragments = preg_split('/[^\p{L}\p{N}]+/u', $term, flags: PREG_SPLIT_NO_EMPTY) ?: [];
+
+        return $fragments !== []
+            && collect($fragments)->every(fn (string $fragment): bool => mb_strlen($fragment) >= self::MINIMUM_INDEXED_SEARCH_LENGTH);
     }
 
     /**
