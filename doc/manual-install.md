@@ -102,7 +102,7 @@ Then run migrations:
 php artisan migrate
 ```
 
-Migrations also create `database/telemetry.sqlite` and `database/logs.sqlite`. Telemetry and logs live in their own files so that ingest doesn't hold up logins. Set `DB_TELEMETRY_DATABASE` or `DB_LOGS_DATABASE` to put them somewhere else. See [Databases](docker.md#databases) for backups and for upgrading an install that has everything in one file.
+Migrations also create `database/telemetry.sqlite` and `database/logs.sqlite`. Telemetry and logs live in their own files so that ingest doesn't hold up logins. Set `DB_TELEMETRY_DATABASE` or `DB_LOGS_DATABASE` to put them somewhere else. See [Databases](docker.md#databases) for backups, resetting and upgrading an install that has everything in one file.
 
 > Want MySQL instead? Set the following in `.env`, create the database manually, then run `php artisan migrate`:
 >

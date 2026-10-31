@@ -69,12 +69,14 @@ Back up the three files together. The simplest consistent backup:
 
 Restore all three files from the same backup.
 
+`php artisan migrate:fresh` resets only the app database. It leaves telemetry and logs in place, so old rows stay behind with no project to show them. To reset everything on SQLite, stop the app and delete `telemetry.sqlite` and `logs.sqlite` first. On MySQL with one database, `migrate:fresh` drops everything.
+
 ### Upgrading from a single database
 
-This version moves telemetry and logs out of the app database when its migrations run, then builds the log search index. It copies the data, compares it with the original, and only then drops the old tables. A crash or restart part way through is safe: the next run starts the move again.
+This version moves telemetry and logs out of the app database when its migrations run, then builds the log search index. It copies the data, checks that the row counts match, and only then drops the old tables. If the migration crashes or restarts part way through, the next run picks up where it left off, as long as `database.sqlite` is still the same file.
 
 1. **Back up** `storage/database/`, or your MySQL database. See [Backups](#backups).
-2. **Stop every container that runs the old version**, including workers and schedulers. Anything still writing during the move can make it stop with an error and leave the data in the old tables.
+2. **Stop every container that runs the old version**, including workers and schedulers. The move notices most writes that happen while it runs and stops with an error, leaving the data in the old tables, but it can't notice all of them, and a write it misses is lost.
 3. **MySQL with separate databases only:** set `DB_TELEMETRY_*` and `DB_LOGS_*` now. The move runs once.
 4. **Run the migrations once**, with the new image and your usual environment and volume:
 
@@ -90,7 +92,7 @@ For a small install you can skip step 4 and let `AUTORUN_ENABLED=true` do it on 
 
 - **Disk space (SQLite).** The move needs free space about the size of your current `database.sqlite`, plus about 1.5 times the size of your logs for the search index. Both steps check first and stop with an error, before changing anything, if there isn't enough.
 - **Time.** Seconds for a small database, minutes for several GB.
-- **Several containers at once.** If two containers run the migrations together, the second waits for the first, then finds nothing left to do.
+- **Several containers at once.** If two containers run the migrations together, the move runs once: the second waits, then finds nothing left to do. The second can still exit with `database is locked` while the first is busy, because Laravel reads its own migrations table before the wait starts. No data is affected, and a restart succeeds.
 - **MySQL.** With the default settings nothing is copied: the tables stay in the one database and only their foreign keys to `users` and `projects` are dropped. The search index is the slow part: adding it rebuilds `log_entries` and blocks writes to that table, so do it in a maintenance window if the table is large. It needs free disk about the size of the table. Deleted rows stay in the index until you run `OPTIMIZE TABLE log_entries`.
 - **Both databases hold data.** If the old tables and the new database both hold rows, for example after restoring an old backup of only `database.sqlite`, the migration stops with an error and changes nothing. Restore all three files from the same backup.
 
