@@ -236,7 +236,7 @@ describe('ingest transactions', function () {
                 ]);
 
                 if ($index === 0) {
-                    ErrorGroup::query()->where('project_id', $this->project->id)->update(['status' => 'resolved', 'resolved_at' => '2026-03-02T09:00:00Z']);
+                    ErrorGroup::query()->where('project_id', $this->project->id)->update(['status' => 'resolved', 'resolved_at' => '2026-03-02 09:00:00']);
                 }
             }
         });
