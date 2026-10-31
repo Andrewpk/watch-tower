@@ -146,6 +146,9 @@ final class TableMover
         $this->assertReachable($source, $from);
         $this->assertReachable($target, $to);
 
+        Databases::dropLeftoverProbeTables($from);
+        Databases::dropLeftoverProbeTables($to);
+
         if (Databases::sameDatabase($from, $to)) {
             $this->keepInPlace($tables, $source, $from, $to, $legacySchema);
 

@@ -30,6 +30,11 @@ final class Databases
     public const LOGS = 'logs';
 
     /**
+     * Name prefix of the short-lived tables that tell whether two connections reach one database.
+     */
+    private const PROBE_TABLE_PREFIX = 'watch_db_probe_';
+
+    /**
      * Tables on the telemetry connection, parents before the tables that reference them.
      *
      * @var list<string>
@@ -230,7 +235,7 @@ final class Databases
      */
     public static function sharesProbeTable(string $first, string $second): bool
     {
-        $name = 'watch_db_probe_'.Str::lower(Str::random(12));
+        $name = self::PROBE_TABLE_PREFIX.Str::lower(Str::random(12));
         $schema = DB::connection($first)->getSchemaBuilder();
 
         try {
@@ -244,6 +249,27 @@ final class Databases
                 $schema->dropIfExists($name);
             } catch (Throwable) {
                 // An unreachable server already failed above with a clearer message.
+            }
+        }
+    }
+
+    /**
+     * Drop probe tables left behind by a migration that was killed mid-probe.
+     *
+     * Only call this while holding the move lock: dropping the table of a probe still in progress would make that
+     * probe report two connections to one database as different.
+     */
+    public static function dropLeftoverProbeTables(string $connection): void
+    {
+        $database = DB::connection($connection);
+        $prefix = $database->getTablePrefix();
+        $schema = $database->getSchemaBuilder();
+
+        foreach ($schema->getTableListing(schemaQualified: false) as $table) {
+            $name = substr($table, strlen($prefix));
+
+            if (str_starts_with($name, self::PROBE_TABLE_PREFIX)) {
+                $schema->dropIfExists($name);
             }
         }
     }

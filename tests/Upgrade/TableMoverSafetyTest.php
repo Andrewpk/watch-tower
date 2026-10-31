@@ -81,6 +81,30 @@ function markerVerified(): array
     return array_map(boolval(...), DB::connection(Databases::TELEMETRY)->table(TableMover::MARKER_TABLE)->pluck('verified', 'table_name')->all());
 }
 
+describe('after a migration was killed during the same-database probe', function () {
+    it('drops the leftover probe tables on both connections and nothing else', function () {
+        $this->upgrade->legacy()->seed();
+        $before = telemetryRows($this->upgrade, 'sqlite');
+
+        Databases::ensureSqliteFileExists(Databases::TELEMETRY);
+
+        foreach (['sqlite', Databases::TELEMETRY] as $connection) {
+            Schema::connection($connection)->create('watch_db_probe_leftover', fn ($table) => $table->id());
+            Schema::connection($connection)->create('watch_db_probes_are_not_this', fn ($table) => $table->id());
+        }
+
+        moveTelemetry($this->upgrade, new TableMover);
+
+        foreach (['sqlite', Databases::TELEMETRY] as $connection) {
+            expect($this->upgrade->tables($connection))
+                ->not->toContain('watch_db_probe_leftover')
+                ->toContain('watch_db_probes_are_not_this');
+        }
+
+        expect(telemetryRows($this->upgrade, Databases::TELEMETRY))->toEqual($before);
+    });
+});
+
 describe('after the target became the only copy', function () {
     it('keeps the target when the app database is replaced by an empty one', function () {
         $this->upgrade->legacy()->seed();
