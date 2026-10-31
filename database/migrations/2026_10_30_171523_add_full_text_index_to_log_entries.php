@@ -4,6 +4,7 @@ use App\Watch\Databases;
 use App\Watch\DiskSpace;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Number;
@@ -45,6 +46,10 @@ return new class extends Migration
     {
         $connection = DB::connection(Databases::LOGS);
 
+        if ($connection->pretending()) {
+            return;
+        }
+
         match ($connection->getDriverName()) {
             'sqlite' => $this->createSqliteIndex($connection),
             'mysql' => $this->createMysqlIndex($connection),
@@ -58,6 +63,10 @@ return new class extends Migration
     public function down(): void
     {
         $connection = DB::connection(Databases::LOGS);
+
+        if ($connection->pretending()) {
+            return;
+        }
 
         match ($connection->getDriverName()) {
             'sqlite' => $this->dropSqliteIndex($connection),
@@ -139,7 +148,8 @@ return new class extends Migration
 
     /**
      * Stop words are switched off for the session first: they are fixed when the index is created, and the default
-     * list would make common words in log messages unsearchable.
+     * list would make common words in log messages unsearchable. Two migrators can both find the index missing; the
+     * one that loses that race sees "duplicate key name", which only means the index is there.
      */
     private function createMysqlIndex(Connection $connection): void
     {
@@ -148,7 +158,14 @@ return new class extends Migration
         }
 
         $connection->statement('SET SESSION innodb_ft_enable_stopword = 0');
-        $connection->statement('ALTER TABLE log_entries ADD FULLTEXT INDEX '.self::FULLTEXT_INDEX.' (message) WITH PARSER ngram');
+
+        try {
+            $connection->statement('ALTER TABLE log_entries ADD FULLTEXT INDEX '.self::FULLTEXT_INDEX.' (message) WITH PARSER ngram');
+        } catch (QueryException $exception) {
+            if (! $this->mysqlIndexExists()) {
+                throw $exception;
+            }
+        }
     }
 
     private function dropMysqlIndex(Connection $connection): void

@@ -688,12 +688,7 @@ it('changes nothing with --pretend', function () {
     $this->upgrade->legacy()->seed();
     $before = $this->upgrade->snapshot('sqlite', 'sqlite');
 
-    Artisan::call('migrate', [
-        '--pretend' => true,
-        '--force' => true,
-        '--realpath' => true,
-        '--path' => [$this->upgrade->splitMigrationFile('telemetry'), $this->upgrade->splitMigrationFile('logs')],
-    ]);
+    expect(Artisan::call('migrate', ['--pretend' => true, '--force' => true]))->toBe(0);
 
     expect($this->upgrade->snapshot('sqlite', 'sqlite'))->toEqual($before)
         ->and(file_exists($this->upgrade->path('telemetry')))->toBeFalse()
