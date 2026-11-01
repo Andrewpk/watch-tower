@@ -16,16 +16,19 @@ class QueriesController extends Controller
     {
         $range = TimeRange::fromLabel($request->string('range', '24h')->toString());
         $search = trim($request->string('search')->toString()) ?: null;
+        $connection = trim($request->string('connection')->toString()) ?: null;
         $sort = $request->string('sort')->toString() ?: null;
         $dir = $request->string('dir')->toString() ?: null;
         $page = max(1, (int) $request->integer('page', 1));
 
         return Inertia::render('projects/queries/index', [
-            'summary' => $stats->summary($project, $range),
-            'queries' => $stats->paginatedQueries($project, $range, $search, $sort, $dir, $page, 25),
+            'summary' => $stats->summary($project, $range, connection: $connection),
+            'queries' => $stats->paginatedQueries($project, $range, $search, $sort, $dir, $page, 25, connection: $connection),
+            'connections' => $stats->connections($project, $range),
             'selectedRange' => $range->label,
             'filters' => [
                 'search' => $search,
+                'connection' => $connection,
                 'sort' => $sort ?? 'total_ms',
                 'dir' => $dir ?? 'desc',
             ],

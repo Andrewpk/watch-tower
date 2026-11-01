@@ -24,6 +24,13 @@ import { PageHeader } from '@/components/page-header';
 import { Pagination } from '@/components/pagination';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
     Table,
@@ -73,8 +80,14 @@ type QueryRow = {
 type Props = {
     summary: Summary;
     queries: Paginated<QueryRow>;
+    connections: string[];
     selectedRange: string;
-    filters: { search: string | null; sort: SortKey; dir: SortDir };
+    filters: {
+        search: string | null;
+        connection: string | null;
+        sort: SortKey;
+        dir: SortDir;
+    };
 };
 
 type SortKey =
@@ -89,6 +102,7 @@ type SortDir = 'asc' | 'desc';
 export default function QueriesIndex({
     summary,
     queries,
+    connections,
     selectedRange,
     filters,
 }: Props) {
@@ -155,18 +169,47 @@ export default function QueriesIndex({
                                 {queries.total.toLocaleString()} Queries
                             </span>
                         </CardTitle>
-                        <form
-                            onSubmit={onSearchSubmit}
-                            className="relative w-64"
-                        >
-                            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                                value={search}
-                                onChange={(e) => setSearch(e.target.value)}
-                                placeholder="Search queries"
-                                className="h-8 pl-8 text-xs"
-                            />
-                        </form>
+                        <div className="flex items-center gap-2">
+                            <form
+                                onSubmit={onSearchSubmit}
+                                className="relative w-64"
+                            >
+                                <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    value={search}
+                                    onChange={(e) => setSearch(e.target.value)}
+                                    placeholder="Search queries"
+                                    className="h-8 pl-8 text-xs"
+                                />
+                            </form>
+                            <Select
+                                value={filters.connection ?? 'all'}
+                                onValueChange={(value) =>
+                                    visit({
+                                        connection:
+                                            value === 'all' ? null : value,
+                                        page: null,
+                                    })
+                                }
+                            >
+                                <SelectTrigger className="h-8 w-40 text-xs">
+                                    <SelectValue placeholder="All connections" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">
+                                        All connections
+                                    </SelectItem>
+                                    {connections.map((connection) => (
+                                        <SelectItem
+                                            key={connection}
+                                            value={connection}
+                                        >
+                                            {connection}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
                     </CardHeader>
                     <Separator />
                     <CardContent className="p-0">
