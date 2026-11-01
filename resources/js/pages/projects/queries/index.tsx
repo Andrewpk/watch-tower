@@ -99,6 +99,13 @@ type SortKey =
     | 'p95_ms';
 type SortDir = 'asc' | 'desc';
 
+/*
+ * Connection names are free text, so real connections get a prefix in the select. That keeps a connection named
+ * "all" from being mistaken for the option that clears the filter.
+ */
+const ALL_CONNECTIONS = 'all';
+const CONNECTION_VALUE_PREFIX = 'connection:';
+
 export default function QueriesIndex({
     summary,
     queries,
@@ -183,11 +190,19 @@ export default function QueriesIndex({
                                 />
                             </form>
                             <Select
-                                value={filters.connection ?? 'all'}
+                                value={
+                                    filters.connection === null
+                                        ? ALL_CONNECTIONS
+                                        : `${CONNECTION_VALUE_PREFIX}${filters.connection}`
+                                }
                                 onValueChange={(value) =>
                                     visit({
                                         connection:
-                                            value === 'all' ? null : value,
+                                            value === ALL_CONNECTIONS
+                                                ? null
+                                                : value.slice(
+                                                      CONNECTION_VALUE_PREFIX.length,
+                                                  ),
                                         page: null,
                                     })
                                 }
@@ -196,13 +211,13 @@ export default function QueriesIndex({
                                     <SelectValue placeholder="All connections" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">
+                                    <SelectItem value={ALL_CONNECTIONS}>
                                         All connections
                                     </SelectItem>
                                     {connections.map((connection) => (
                                         <SelectItem
                                             key={connection}
-                                            value={connection}
+                                            value={`${CONNECTION_VALUE_PREFIX}${connection}`}
                                         >
                                             {connection}
                                         </SelectItem>
@@ -287,6 +302,8 @@ export default function QueriesIndex({
                                             key={row.hash}
                                             row={row}
                                             slug={slug}
+                                            range={selectedRange}
+                                            connection={filters.connection}
                                         />
                                     ))
                                 )}
@@ -305,8 +322,20 @@ export default function QueriesIndex({
     );
 }
 
-function QueryRowTr({ row, slug }: { row: QueryRow; slug: string }) {
-    const href = queriesRoutes.show([slug, row.hash]).url;
+function QueryRowTr({
+    row,
+    slug,
+    range,
+    connection,
+}: {
+    row: QueryRow;
+    slug: string;
+    range: string;
+    connection: string | null;
+}) {
+    const href = queriesRoutes.show([slug, row.hash], {
+        query: { range, connection },
+    }).url;
 
     return (
         <TableRow className="cursor-pointer hover:bg-muted/50">
