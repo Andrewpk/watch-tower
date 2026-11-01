@@ -51,6 +51,26 @@ class TelemetryPruner
     public function __construct(private readonly int $chunkSize = 5000) {}
 
     /**
+     * Tables in the order {@see purge()} empties them: telemetry tables first (children before parents), then the
+     * log entries, and the error groups last.
+     *
+     * The tables live in different databases, so a foreign key can no longer hold a child back. Deleting the error
+     * groups last keeps the comments attached to them, which cascade inside the telemetry database, until the
+     * occurrences that point at them are gone.
+     *
+     * @return list<string>
+     */
+    public static function purgeOrder(): array
+    {
+        $tables = array_keys(self::TIME_COLUMNS);
+
+        $telemetry = array_values(array_filter($tables, fn (string $table): bool => Databases::connectionFor($table) === Databases::TELEMETRY));
+        $logs = array_values(array_filter($tables, fn (string $table): bool => Databases::connectionFor($table) === Databases::LOGS));
+
+        return [...$telemetry, ...$logs, 'error_groups'];
+    }
+
+    /**
      * Delete a project's telemetry older than the cutoff.
      *
      * `error_groups` are never touched here, only their occurrences.
@@ -78,7 +98,7 @@ class TelemetryPruner
         $counts = [];
 
         foreach (self::TIME_COLUMNS as $table => $timeColumn) {
-            $counts[$table] = DB::table($table)
+            $counts[$table] = DB::connection(Databases::connectionFor($table))->table($table)
                 ->where('project_id', $projectId)
                 ->where($timeColumn, '<', $before)
                 ->count();
@@ -107,7 +127,7 @@ class TelemetryPruner
         $deleted = [];
         $chunks = 0;
 
-        foreach ([...array_keys(self::TIME_COLUMNS), 'error_groups'] as $table) {
+        foreach (self::purgeOrder() as $table) {
             $deleted[$table] = 0;
 
             do {
@@ -145,7 +165,9 @@ class TelemetryPruner
      */
     private function deleteChunk(string $table, string $projectId, ?string $timeColumn = null, ?CarbonInterface $before = null): array
     {
-        $ids = DB::table($table)
+        $connection = DB::connection(Databases::connectionFor($table));
+
+        $ids = $connection->table($table)
             ->where('project_id', $projectId)
             ->when($timeColumn !== null, fn ($query) => $query->where($timeColumn, '<', $before))
             ->limit($this->chunkSize)
@@ -155,6 +177,6 @@ class TelemetryPruner
             return [0, 0];
         }
 
-        return [$ids->count(), DB::table($table)->whereIn('id', $ids->all())->delete()];
+        return [$ids->count(), $connection->table($table)->whereIn('id', $ids->all())->delete()];
     }
 }

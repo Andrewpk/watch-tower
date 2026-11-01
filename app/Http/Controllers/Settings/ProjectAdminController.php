@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Settings;
 
 use App\Http\Controllers\Controller;
 use App\Jobs\DeleteProjectData;
+use App\Models\ErrorGroup;
 use App\Models\Organization;
 use App\Models\Project;
 use App\Models\User;
@@ -12,7 +13,6 @@ use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Crypt;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -45,10 +45,20 @@ class ProjectAdminController extends Controller
 
         $projects = Project::query()
             ->orderBy('name')
-            ->withCount(['admins', 'errorGroups as open_issues_count' => function ($q) {
-                $q->where('status', 'unresolved');
-            }])
-            ->get(['id', 'name', 'slug', 'description', 'api_key_prefix', 'api_key_last_used_at', 'previous_api_key_hash', 'previous_api_key_expires_at', 'sampling_rate', 'retention_days', 'created_at'])
+            ->withCount('admins')
+            ->get(['id', 'name', 'slug', 'description', 'api_key_prefix', 'api_key_last_used_at', 'previous_api_key_hash', 'previous_api_key_expires_at', 'sampling_rate', 'retention_days', 'created_at']);
+
+        /*
+         * Issues live in the telemetry database, so their counts cannot be a subquery on the projects query.
+         */
+        $openIssueCounts = ErrorGroup::query()
+            ->whereIn('project_id', $projects->modelKeys())
+            ->where('status', 'unresolved')
+            ->groupBy('project_id')
+            ->selectRaw('project_id, COUNT(*) AS total')
+            ->pluck('total', 'project_id');
+
+        $projects = $projects
             ->map(fn (Project $project) => [
                 'id' => $project->id,
                 'name' => $project->name,
@@ -62,7 +72,7 @@ class ProjectAdminController extends Controller
                 'sampling_rate' => $project->sampling_rate,
                 'retention_days' => $project->retention_days,
                 'admins_count' => $project->admins_count,
-                'open_issues_count' => $project->open_issues_count,
+                'open_issues_count' => (int) ($openIssueCounts[$project->id] ?? 0),
                 'created_at' => $project->created_at?->toISOString(),
             ]);
 
@@ -193,7 +203,7 @@ class ProjectAdminController extends Controller
             ]);
         }
 
-        DB::transaction(function () use ($project) {
+        $project->getConnection()->transaction(function () use ($project) {
             $project->admins()->detach();
             $project->forceFill(['deleting_at' => now()])->save();
         });

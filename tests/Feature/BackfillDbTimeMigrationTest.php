@@ -3,6 +3,7 @@
 use App\Models\Project;
 use App\Models\Trace;
 use App\Models\TraceQuery;
+use App\Watch\Databases;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
 
@@ -12,6 +13,21 @@ use Illuminate\Support\Facades\DB;
 function backfillDbTimeMigration(): Migration
 {
     return require glob(database_path('migrations/*_backfill_db_time_ms_on_traces_table.php'))[0];
+}
+
+/**
+ * Run a migration the way the migrator does for a telemetry migration: with the telemetry connection as default.
+ */
+function runOnTelemetry(Migration $migration, string $direction): void
+{
+    $default = DB::getDefaultConnection();
+    DB::setDefaultConnection(Databases::TELEMETRY);
+
+    try {
+        $migration->{$direction}();
+    } finally {
+        DB::setDefaultConnection($default);
+    }
 }
 
 function traceWithQueries(Project $project, float $dbTimeMs, array $durations): Trace
@@ -29,7 +45,7 @@ it('sums query durations into traces that have none recorded', function () {
     $project = Project::factory()->create();
     $trace = traceWithQueries($project, 0, [2, 3]);
 
-    backfillDbTimeMigration()->up();
+    runOnTelemetry(backfillDbTimeMigration(), 'up');
 
     expect($trace->fresh()->db_time_ms)->toBe(5.0);
 });
@@ -37,7 +53,7 @@ it('sums query durations into traces that have none recorded', function () {
 it('keeps a db_time_ms that is already set', function () {
     $trace = traceWithQueries(Project::factory()->create(), 40, [2, 3]);
 
-    backfillDbTimeMigration()->up();
+    runOnTelemetry(backfillDbTimeMigration(), 'up');
 
     expect($trace->fresh()->db_time_ms)->toBe(40.0);
 });
@@ -48,7 +64,7 @@ it('leaves traces without queries at zero and does not mix up traces', function 
     $first = traceWithQueries($project, 0, [1.5]);
     $second = traceWithQueries($project, 0, [4]);
 
-    backfillDbTimeMigration()->up();
+    runOnTelemetry(backfillDbTimeMigration(), 'up');
 
     expect($without->fresh()->db_time_ms)->toBe(0.0)
         ->and($first->fresh()->db_time_ms)->toBe(1.5)
@@ -59,8 +75,8 @@ it('has nothing to undo when rolled back', function () {
     $trace = traceWithQueries(Project::factory()->create(), 0, [2, 3]);
     $migration = backfillDbTimeMigration();
 
-    $migration->up();
-    $migration->down();
+    runOnTelemetry($migration, 'up');
+    runOnTelemetry($migration, 'down');
 
-    expect(DB::table('traces')->where('id', $trace->id)->value('db_time_ms'))->toEqual(5);
+    expect(dbTable('traces')->where('id', $trace->id)->value('db_time_ms'))->toEqual(5);
 });

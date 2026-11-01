@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\MetricFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -26,6 +27,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class Metric extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<MetricFactory> */
     use HasFactory;
 

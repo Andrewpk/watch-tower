@@ -172,7 +172,7 @@ class EventStore
         $durationMs = max(0.0, (float) ($data['duration_ms'] ?? 0));
         $file = $this->limitedString($data['file'] ?? null, 255);
 
-        DB::transaction(function () use ($trace, $durationMs, $file, $project, $data): void {
+        DB::connection(Databases::TELEMETRY)->transaction(function () use ($trace, $durationMs, $file, $project, $data): void {
             if ($durationMs > 0) {
                 Trace::query()->whereKey($trace->id)->increment('db_time_ms', $durationMs);
             }
@@ -226,7 +226,7 @@ class EventStore
         $sourceType = $this->limitedString($data['source_type'] ?? null, 50);
         $sourceLabel = $this->limitedString($data['source_label'] ?? null, 255);
 
-        $occurrence = DB::transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release, $sourceType, $sourceLabel) {
+        $occurrence = DB::connection(Databases::TELEMETRY)->transaction(function () use ($project, $trace, $fingerprint, $exceptionClass, $message, $file, $line, $occurredAt, $data, $userIdentifier, $userDetails, $isHandled, $languageVersion, $frameworkVersion, $hostname, $release, $sourceType, $sourceLabel) {
             if ($trace && ! $trace->has_errors) {
                 $trace->forceFill(['has_errors' => true])->save();
             }
@@ -445,7 +445,7 @@ class EventStore
             return;
         }
 
-        DB::transaction(function () use ($run, $startedAt, $outcome, $details): void {
+        DB::connection(Databases::TELEMETRY)->transaction(function () use ($run, $startedAt, $outcome, $details): void {
             $locked = QueueJobRun::whereKey($run->id)->lockForUpdate()->firstOrFail();
 
             if ($this->isNewestAttempt($locked, $startedAt, $outcome['attempts'])) {

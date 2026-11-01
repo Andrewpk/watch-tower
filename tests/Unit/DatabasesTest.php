@@ -1,0 +1,384 @@
+<?php
+
+use App\Watch\Databases;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
+use Tests\TestCase;
+
+uses(TestCase::class);
+
+/**
+ * A MySQL connection array as `config/database.php` builds it.
+ *
+ * @return array<string, mixed>
+ */
+function baseMysqlConnection(array $overrides = []): array
+{
+    return [
+        'driver' => 'mysql',
+        'url' => null,
+        'host' => 'db.internal',
+        'port' => '3306',
+        'database' => 'watch',
+        'username' => 'app',
+        'password' => 'secret',
+        'unix_socket' => '',
+        'charset' => 'utf8mb4',
+        'prefix' => '',
+        ...$overrides,
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function baseSqliteConnection(string $database): array
+{
+    return [
+        'driver' => 'sqlite',
+        'url' => null,
+        'database' => $database,
+        'prefix' => '',
+        'foreign_key_constraints' => true,
+        'busy_timeout' => 5000,
+        'journal_mode' => 'wal',
+    ];
+}
+
+it('sends each table to the connection that owns it', function () {
+    foreach (Databases::TELEMETRY_TABLES as $table) {
+        expect(Databases::connectionFor($table))->toBe('telemetry');
+    }
+
+    expect(Databases::connectionFor('log_entries'))->toBe('logs');
+
+    foreach (['users', 'projects', 'organizations', 'project_user', 'sessions', 'cache', 'cache_locks', 'maintenance_runs', 'jobs', 'job_batches', 'failed_jobs', 'telescope_entries', 'migrations'] as $table) {
+        expect(Databases::connectionFor($table))->toBe(config('database.default'));
+    }
+});
+
+it('does not list a table twice', function () {
+    $tables = [...Databases::TELEMETRY_TABLES, ...Databases::LOG_TABLES];
+
+    expect($tables)->toBe(array_values(array_unique($tables)));
+});
+
+it('keeps the queue tables in the app database', function () {
+    expect(Databases::TELEMETRY_TABLES)->not->toContain('jobs', 'job_batches', 'failed_jobs');
+});
+
+it('configures telemetry and logs as connections of their own', function () {
+    $connections = config('database.connections');
+
+    expect($connections)->toHaveKeys(['telemetry', 'logs'])
+        ->and(config('database.default'))->toBe('sqlite')
+        ->and($connections['telemetry']['driver'])->toBe('sqlite')
+        ->and($connections['telemetry']['url'])->toBeNull()
+        ->and($connections['telemetry']['foreign_key_constraints'])->toBe($connections['sqlite']['foreign_key_constraints']);
+});
+
+it('keeps in-memory databases separate in the test environment', function () {
+    expect(config('database.connections.sqlite.database'))->toBe(':memory:')
+        ->and(config('database.connections.telemetry.database'))->toBe(':memory:')
+        ->and(config('database.connections.logs.database'))->toBe(':memory:')
+        ->and(DB::connection('sqlite')->getPdo())->not->toBe(DB::connection('telemetry')->getPdo())
+        ->and(Databases::sameDatabase('sqlite', 'telemetry'))->toBeFalse()
+        ->and(Databases::sameDatabase('telemetry', 'logs'))->toBeFalse();
+});
+
+describe('splitting a SQLite connection', function () {
+    it('puts the file beside the app database', function () {
+        $config = Databases::splitConnection(baseSqliteConnection('/data/app.sqlite'), 'telemetry.sqlite');
+
+        expect($config['database'])->toBe('/data/telemetry.sqlite')
+            ->and($config['driver'])->toBe('sqlite')
+            ->and($config['busy_timeout'])->toBe(5000)
+            ->and($config['journal_mode'])->toBe('wal')
+            ->and($config['foreign_key_constraints'])->toBeTrue()
+            ->and($config['url'])->toBeNull();
+    });
+
+    it('stays in memory when the app database is in memory', function () {
+        expect(Databases::splitConnection(baseSqliteConnection(':memory:'), 'logs.sqlite')['database'])->toBe(':memory:');
+    });
+
+    it('uses the configured path instead', function () {
+        $config = Databases::splitConnection(baseSqliteConnection('/data/app.sqlite'), 'logs.sqlite', ['database' => '/elsewhere/l.db']);
+
+        expect($config['database'])->toBe('/elsewhere/l.db');
+    });
+
+    it('ignores a blank configured path', function () {
+        $config = Databases::splitConnection(baseSqliteConnection('/data/app.sqlite'), 'logs.sqlite', ['database' => '', 'host' => 'ignored']);
+
+        expect($config['database'])->toBe('/data/logs.sqlite')
+            ->and($config)->not->toHaveKey('host');
+    });
+
+    it('does not inherit a URL that points at the app database', function () {
+        $config = Databases::splitConnection(baseSqliteConnection('/data/app.sqlite') + ['url' => 'sqlite:////data/app.sqlite'], 'logs.sqlite');
+
+        expect($config['database'])->toBe('/data/logs.sqlite')
+            ->and($config['url'])->toBeNull();
+    });
+
+    it('resolves a relative app database against the base path', function () {
+        $config = Databases::splitConnection(baseSqliteConnection('storage/app.sqlite'), 'logs.sqlite');
+
+        expect($config['database'])->toBe(base_path('storage').'/logs.sqlite');
+    });
+});
+
+describe('splitting a MySQL connection', function () {
+    it('falls back to the app database when nothing is configured', function () {
+        $config = Databases::splitConnection(baseMysqlConnection(), 'telemetry.sqlite');
+
+        expect($config)->toEqual(baseMysqlConnection());
+    });
+
+    it('takes only the settings that are configured', function () {
+        $config = Databases::splitConnection(baseMysqlConnection(), 'telemetry.sqlite', [
+            'host' => 'telemetry.internal',
+            'database' => 'watch_telemetry',
+            'port' => null,
+            'username' => '',
+            'password' => null,
+        ]);
+
+        expect($config['host'])->toBe('telemetry.internal')
+            ->and($config['database'])->toBe('watch_telemetry')
+            ->and($config['port'])->toBe('3306')
+            ->and($config['username'])->toBe('app')
+            ->and($config['password'])->toBe('secret');
+    });
+
+    it('drops the inherited unix socket when the host is overridden, because the socket would win', function () {
+        $base = baseMysqlConnection(['unix_socket' => '/var/run/mysqld/mysqld.sock']);
+
+        expect(Databases::splitConnection($base, 'x.sqlite', ['host' => 'telemetry.internal'])['unix_socket'])->toBeEmpty()
+            ->and(Databases::splitConnection($base, 'x.sqlite', ['database' => 'other'])['unix_socket'])->toBe('/var/run/mysqld/mysqld.sock');
+    });
+
+    it('expands a base URL so a single override is not undone by it', function () {
+        $config = Databases::splitConnection(
+            baseMysqlConnection(['url' => 'mysql://user:pass@urlhost:3307/urldb']),
+            'logs.sqlite',
+            ['database' => 'watch_logs'],
+        );
+
+        expect($config['host'])->toBe('urlhost')
+            ->and($config['port'])->toBe(3307)
+            ->and($config['username'])->toBe('user')
+            ->and($config['password'])->toBe('pass')
+            ->and($config['database'])->toBe('watch_logs')
+            ->and($config['url'])->toBeNull();
+    });
+
+    it('lets a URL of its own replace the discrete settings', function () {
+        $config = Databases::splitConnection(baseMysqlConnection(), 'logs.sqlite', ['url' => 'mysql://u:p@elsewhere/other']);
+
+        expect($config['url'])->toBe('mysql://u:p@elsewhere/other');
+    });
+
+    it('applies to MariaDB as well', function () {
+        $config = Databases::splitConnection(baseMysqlConnection(['driver' => 'mariadb']), 'logs.sqlite', ['database' => 'watch_logs']);
+
+        expect($config['driver'])->toBe('mariadb')
+            ->and($config['database'])->toBe('watch_logs');
+    });
+});
+
+describe('comparing SQLite databases', function () {
+    beforeEach(function () {
+        $this->directory = sys_get_temp_dir().'/watch-tower-databases-'.Str::lower(Str::random(8));
+        File::ensureDirectoryExists($this->directory);
+
+        foreach (['one', 'two'] as $name) {
+            config(["database.connections.{$name}" => baseSqliteConnection("{$this->directory}/{$name}.sqlite")]);
+            touch("{$this->directory}/{$name}.sqlite");
+        }
+    });
+
+    afterEach(function () {
+        DB::purge('one');
+        DB::purge('two');
+        DB::purge('alias');
+        File::deleteDirectory($this->directory);
+    });
+
+    it('tells different files apart', function () {
+        expect(Databases::sameDatabase('one', 'two'))->toBeFalse();
+    });
+
+    it('recognises one connection as itself', function () {
+        expect(Databases::sameDatabase('one', 'one'))->toBeTrue();
+    });
+
+    it('recognises the same file under another name or path', function () {
+        symlink("{$this->directory}/one.sqlite", "{$this->directory}/link.sqlite");
+        config(['database.connections.alias' => baseSqliteConnection("{$this->directory}/sub/../link.sqlite")]);
+        mkdir("{$this->directory}/sub");
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
+    });
+
+    it('recognises a hard link, which has another path but is the same file', function () {
+        link("{$this->directory}/one.sqlite", "{$this->directory}/hard.sqlite");
+        config(['database.connections.alias' => baseSqliteConnection("{$this->directory}/hard.sqlite")]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
+    });
+
+    it('reads the file from the url of a connection, which overrides its database setting', function () {
+        config([
+            'database.connections.alias' => [...baseSqliteConnection("{$this->directory}/two.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/one.sqlite'],
+        ]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeTrue();
+    });
+
+    it('tells a url that points at another file apart from a config that names the same one', function () {
+        config([
+            'database.connections.alias' => [...baseSqliteConnection("{$this->directory}/one.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/two.sqlite'],
+        ]);
+
+        expect(Databases::sameDatabase('one', 'alias'))->toBeFalse();
+    });
+
+    it('never treats in-memory databases as shared', function () {
+        config([
+            'database.connections.one' => baseSqliteConnection(':memory:'),
+            'database.connections.two' => baseSqliteConnection(':memory:'),
+        ]);
+
+        expect(Databases::sameDatabase('one', 'two'))->toBeFalse();
+    });
+});
+
+describe('comparing server connections', function () {
+    it('recognises identical settings without touching the server', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'username' => 'someone else']),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeTrue();
+    });
+
+    it('uses the url of a connection, so a url to another server is not mistaken for the first one', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'url' => 'mysql://app:secret@elsewhere.invalid:3306/watch']),
+        ]);
+
+        // Different servers cannot be settled from the settings alone, so the probe runs and fails on the unreachable host.
+        expect(fn () => Databases::sameDatabase('first', 'second'))->toThrow(RuntimeException::class, 'Cannot tell whether');
+    });
+
+    it('recognises a url that names the same server as the other connection without touching it', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['url' => 'mysql://other:pw@unreachable.invalid:3306/watch']),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeTrue();
+    });
+
+    it('never mixes drivers', function () {
+        config([
+            'database.connections.first' => baseMysqlConnection(['host' => 'unreachable.invalid']),
+            'database.connections.second' => baseMysqlConnection(['host' => 'unreachable.invalid', 'driver' => 'mariadb']),
+            'database.connections.file' => baseSqliteConnection(':memory:'),
+        ]);
+
+        expect(Databases::sameDatabase('first', 'second'))->toBeFalse()
+            ->and(Databases::sameDatabase('first', 'file'))->toBeFalse();
+    });
+});
+
+describe('probing for a shared database', function () {
+    beforeEach(function () {
+        $this->directory = sys_get_temp_dir().'/watch-tower-databases-'.Str::lower(Str::random(8));
+        File::ensureDirectoryExists($this->directory);
+
+        foreach (['one', 'two'] as $name) {
+            config(["database.connections.{$name}" => [...baseSqliteConnection("{$this->directory}/{$name}.sqlite"), 'journal_mode' => 'delete']]);
+            touch("{$this->directory}/{$name}.sqlite");
+        }
+
+        symlink("{$this->directory}/one.sqlite", "{$this->directory}/link.sqlite");
+        config(['database.connections.alias' => [...baseSqliteConnection("{$this->directory}/link.sqlite"), 'journal_mode' => 'delete']]);
+    });
+
+    afterEach(function () {
+        foreach (['one', 'two', 'alias'] as $name) {
+            DB::purge($name);
+        }
+
+        File::deleteDirectory($this->directory);
+    });
+
+    it('sees a table created through one connection from the other when they share a database', function () {
+        expect(Databases::sharesProbeTable('one', 'alias'))->toBeTrue()
+            ->and(Databases::sharesProbeTable('one', 'two'))->toBeFalse();
+    });
+
+    it('leaves no probe table behind', function () {
+        Databases::sharesProbeTable('one', 'alias');
+        Databases::sharesProbeTable('one', 'two');
+
+        expect(collect(Schema::connection('one')->getTables())->pluck('name')->all())->toBe([]);
+    });
+});
+
+describe('creating SQLite files', function () {
+    beforeEach(function () {
+        $this->directory = sys_get_temp_dir().'/watch-tower-databases-'.Str::lower(Str::random(8));
+    });
+
+    afterEach(function () {
+        File::deleteDirectory($this->directory);
+    });
+
+    it('creates the file and any missing directory', function () {
+        config(['database.connections.fresh' => baseSqliteConnection("{$this->directory}/nested/fresh.sqlite")]);
+
+        Databases::ensureSqliteFileExists('fresh');
+
+        expect(file_exists("{$this->directory}/nested/fresh.sqlite"))->toBeTrue();
+    });
+
+    it('creates the file a url names, not the one in the database setting', function () {
+        config(['database.connections.fresh' => [...baseSqliteConnection("{$this->directory}/ignored.sqlite"), 'url' => 'sqlite:///'.$this->directory.'/from-url.sqlite']]);
+
+        Databases::ensureSqliteFileExists('fresh');
+
+        expect(file_exists("{$this->directory}/from-url.sqlite"))->toBeTrue()
+            ->and(file_exists("{$this->directory}/ignored.sqlite"))->toBeFalse();
+    });
+
+    it('leaves an existing file alone', function () {
+        mkdir($this->directory);
+        file_put_contents("{$this->directory}/kept.sqlite", 'contents');
+        config(['database.connections.kept' => baseSqliteConnection("{$this->directory}/kept.sqlite")]);
+
+        Databases::ensureSqliteFileExists('kept');
+
+        expect(file_get_contents("{$this->directory}/kept.sqlite"))->toBe('contents');
+    });
+
+    it('does nothing for in-memory databases and other drivers', function () {
+        config([
+            'database.connections.memory' => baseSqliteConnection(':memory:'),
+            'database.connections.server' => baseMysqlConnection(),
+        ]);
+
+        Databases::ensureSqliteFileExists('memory');
+        Databases::ensureSqliteFileExists('server');
+        Databases::ensureSqliteFileExists('not-configured');
+
+        expect(file_exists(':memory:'))->toBeFalse();
+    });
+});

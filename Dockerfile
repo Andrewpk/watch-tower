@@ -80,8 +80,10 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Runs before the base image's Laravel automations (50-*). Makes sure the
-# storage tree and the default SQLite file exist, so a freshly mounted empty
-# volume works. Sourced by the entrypoint, so it must stay POSIX sh.
+# storage tree and the app, telemetry and logs SQLite files exist, so a freshly
+# mounted empty volume works. The telemetry and logs files default to the
+# directory of DB_DATABASE, as in config/database.php. Sourced by the
+# entrypoint, so it must stay POSIX sh.
 COPY --chmod=755 <<'EOF' /etc/entrypoint.d/40-watch-tower-storage.sh
 #!/bin/sh
 : "${APP_BASE_DIR:=/var/www/html}"
@@ -96,7 +98,14 @@ prepare_storage() {
         "$APP_BASE_DIR/storage/logs" || return 1
 
     if [ "${DB_CONNECTION:-sqlite}" = "sqlite" ] && [ -n "${DB_DATABASE:-}" ] && [ "$DB_DATABASE" != ":memory:" ]; then
-        mkdir -p "$(dirname "$DB_DATABASE")" && touch "$DB_DATABASE" || return 1
+        watch_tower_db_dir="$(dirname "$DB_DATABASE")"
+        for watch_tower_db in \
+            "$DB_DATABASE" \
+            "${DB_TELEMETRY_DATABASE:-$watch_tower_db_dir/telemetry.sqlite}" \
+            "${DB_LOGS_DATABASE:-$watch_tower_db_dir/logs.sqlite}"; do
+            [ "$watch_tower_db" = ":memory:" ] && continue
+            mkdir -p "$(dirname "$watch_tower_db")" && touch "$watch_tower_db" || return 1
+        done
     fi
 }
 

@@ -7,7 +7,6 @@ use App\Models\TraceQuery;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
-use Illuminate\Support\Facades\DB;
 
 class QueryStats
 {
@@ -182,7 +181,8 @@ class QueryStats
             ->select('file', 'line')
             ->groupBy('file', 'line');
 
-        $locationsTotal = DB::query()->fromSub((clone $locationGroups)->toBase(), 'location_groups')->count();
+        $locationGroupsQuery = (clone $locationGroups)->toBase();
+        $locationsTotal = $locationGroupsQuery->newQuery()->fromSub($locationGroupsQuery, 'location_groups')->count();
 
         $locations = (clone $locationGroups)
             ->selectRaw('COUNT(*) AS total')

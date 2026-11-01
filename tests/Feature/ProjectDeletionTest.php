@@ -7,7 +7,6 @@ use App\Models\User;
 use App\Watch\TelemetryPruner;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Bus;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
@@ -36,7 +35,7 @@ it('hides the project at once and queues the deletion job', function () {
     expect(Project::find($this->project->id))->toBeNull()
         ->and(Project::where('slug', $this->project->slug)->exists())->toBeFalse()
         ->and($this->admin->projects()->count())->toBe(0)
-        ->and(DB::table('project_user')->where('project_id', $this->project->id)->count())->toBe(0)
+        ->and(dbTable('project_user')->where('project_id', $this->project->id)->count())->toBe(0)
         ->and(Project::withoutGlobalScope('notDeleting')->find($this->project->id)->deleting_at)->not->toBeNull();
 });
 
@@ -59,12 +58,12 @@ it('removes the project and all of its telemetry when the job runs', function ()
 
     deleteProjectViaAdmin($this, $this->project, $this->project->slug)->assertRedirect();
 
-    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
         ->and(ErrorGroup::where('project_id', $this->project->id)->count())->toBe(0);
 
     foreach (array_keys(TelemetryPruner::TIME_COLUMNS) as $table) {
-        expect(DB::table($table)->where('project_id', $this->project->id)->count())->toBe(0, $table)
-            ->and(DB::table($table)->where('project_id', $other->id)->count())->toBe(1, $table);
+        expect(dbTable($table)->where('project_id', $this->project->id)->count())->toBe(0, $table)
+            ->and(dbTable($table)->where('project_id', $other->id)->count())->toBe(1, $table);
     }
 });
 
@@ -78,9 +77,9 @@ it('deletes in chunks smaller than the data set', function () {
 
     DeleteProjectData::dispatchSync($this->project->id);
 
-    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
-        ->and(DB::table('traces')->count())->toBe(0)
-        ->and(DB::table('error_groups')->count())->toBe(0);
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(dbTable('traces')->count())->toBe(0)
+        ->and(dbTable('error_groups')->count())->toBe(0);
 });
 
 it('never deletes a project that is not marked as deleting', function () {
@@ -89,7 +88,7 @@ it('never deletes a project that is not marked as deleting', function () {
     DeleteProjectData::dispatchSync($this->project->id);
 
     expect(Project::find($this->project->id))->not->toBeNull()
-        ->and(DB::table('traces')->where('project_id', $this->project->id)->count())->toBe(1);
+        ->and(dbTable('traces')->where('project_id', $this->project->id)->count())->toBe(1);
 });
 
 it('does nothing when the project is already gone', function () {
@@ -104,7 +103,7 @@ it('does nothing when the project is already gone', function () {
 function remainingProjectRows(Project $project): int
 {
     return collect([...array_keys(TelemetryPruner::TIME_COLUMNS), 'error_groups'])
-        ->sum(fn (string $table) => DB::table($table)->where('project_id', $project->id)->count());
+        ->sum(fn (string $table) => dbTable($table)->where('project_id', $project->id)->count());
 }
 
 it('stops a run after its chunk budget and dispatches itself again', function () {
@@ -118,7 +117,7 @@ it('stops a run after its chunk budget and dispatches itself again', function ()
     (new DeleteProjectData($this->project->id, maxChunks: 1))->withFakeQueueInteractions()->handle(new TelemetryPruner(1));
 
     expect(remainingProjectRows($this->project))->toBe($before - 1)
-        ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeTrue();
+        ->and(dbTable('projects')->where('id', $this->project->id)->exists())->toBeTrue();
 
     Bus::assertDispatched(
         DeleteProjectData::class,
@@ -147,7 +146,7 @@ it('removes the project and all its telemetry after repeated time-boxed runs', f
     expect($runs)->toBeGreaterThan(1)
         ->and($job)->toBeNull()
         ->and(Bus::dispatched(DeleteProjectData::class))->toHaveCount($runs - 1)
-        ->and(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
         ->and(remainingProjectRows($this->project))->toBe(0);
 });
 
@@ -162,7 +161,7 @@ it('purges to completion in a single run when dispatched on the sync queue', fun
 
     DeleteProjectData::dispatch($this->project->id, maxChunks: 1);
 
-    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
         ->and(remainingProjectRows($this->project))->toBe(0);
 });
 
@@ -177,7 +176,7 @@ it('purges to completion in a single run when handled with no queue job attached
 
     Bus::assertNotDispatched(DeleteProjectData::class);
 
-    expect(DB::table('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
         ->and(remainingProjectRows($this->project))->toBe(0);
 });
 
@@ -214,4 +213,38 @@ it('times out before the queue hands the job to another worker', function () {
         ->map(fn (string $connection) => config("queue.connections.{$connection}.retry_after"));
 
     expect((new DeleteProjectData($this->project->id))->timeout)->toBeLessThan($retryAfters->min());
+});
+
+it('removes the rows a failed final purge left behind when the job is retried', function () {
+    seedTelemetry($this->project, now());
+    $this->project->forceFill(['deleting_at' => now()])->save();
+
+    $failing = new class extends TelemetryPruner
+    {
+        public int $calls = 0;
+
+        public ?Project $project = null;
+
+        public function purge(string $projectId, ?int $maxChunks = null, ?float $deadline = null): array
+        {
+            if (++$this->calls === 2) {
+                seedTelemetry($this->project, now());
+
+                throw new RuntimeException('database went away');
+            }
+
+            return parent::purge($projectId, $maxChunks, $deadline);
+        }
+    };
+
+    $failing->project = $this->project;
+
+    expect(fn () => (new DeleteProjectData($this->project->id))->handle($failing))->toThrow(RuntimeException::class, 'database went away');
+
+    expect(dbTable('projects')->where('id', $this->project->id)->exists())->toBeFalse()
+        ->and(remainingProjectRows($this->project))->toBeGreaterThan(0);
+
+    (new DeleteProjectData($this->project->id))->handle(new TelemetryPruner);
+
+    expect(remainingProjectRows($this->project))->toBe(0);
 });

@@ -25,14 +25,14 @@ class LogStats
     ): LengthAwarePaginator {
         $query = $this->baseQuery($project, $range);
 
-        if ($search !== null && $search !== '') {
-            $query->where('message', 'like', '%'.$search.'%');
-        }
         if ($level !== null && $level !== '' && in_array($level, self::LEVELS, true)) {
             $query->where('level', $level);
         }
         if ($userName !== null && $userName !== '') {
             $query->where('user_name', $userName);
+        }
+        if ($search !== null && $search !== '') {
+            $query->searchMessage($search);
         }
 
         $paginator = $query

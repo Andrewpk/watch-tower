@@ -5,6 +5,7 @@ use App\Models\ErrorOccurrence;
 use App\Models\IssueComment;
 use App\Models\MaintenanceRun;
 use App\Models\Project;
+use App\Watch\Databases;
 use App\Watch\TelemetryPruner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -21,7 +22,7 @@ beforeEach(function () {
 function pruneTelemetryCounts(Project $project): array
 {
     return collect(array_keys(TelemetryPruner::TIME_COLUMNS))
-        ->mapWithKeys(fn (string $table) => [$table => DB::table($table)->where('project_id', $project->id)->count()])
+        ->mapWithKeys(fn (string $table) => [$table => dbTable($table)->where('project_id', $project->id)->count()])
         ->all();
 }
 
@@ -36,7 +37,7 @@ it('deletes rows older than the retention window from every telemetry table and 
     expect(pruneTelemetryCounts($project))->each->toBe(1)
         ->and(pruneTelemetryCounts($project))->toHaveCount(14);
 
-    expect(DB::table('trace_queries')->where('project_id', $project->id)->value('occurred_at'))
+    expect(dbTable('trace_queries')->where('project_id', $project->id)->value('occurred_at'))
         ->toStartWith('2026-05-17');
 });
 
@@ -107,7 +108,7 @@ it('deletes in chunks until nothing old is left', function () {
     $project = Project::factory()->create(['retention_days' => 30]);
 
     foreach (range(1, 7) as $_) {
-        DB::table('log_entries')->insert([
+        dbTable('log_entries')->insert([
             'id' => (string) Str::uuid(),
             'project_id' => $project->id,
             'level' => 'info',
@@ -116,7 +117,7 @@ it('deletes in chunks until nothing old is left', function () {
         ]);
     }
 
-    DB::table('log_entries')->insert([
+    dbTable('log_entries')->insert([
         'id' => (string) Str::uuid(),
         'project_id' => $project->id,
         'level' => 'info',
@@ -124,14 +125,14 @@ it('deletes in chunks until nothing old is left', function () {
         'occurred_at' => now()->subDay(),
     ]);
 
-    DB::enableQueryLog();
+    DB::connection(Databases::LOGS)->enableQueryLog();
 
     $this->artisan('watch:prune', ['--chunk' => 2])->assertSuccessful();
 
-    $deletes = collect(DB::getQueryLog())->filter(fn (array $query) => str_starts_with($query['query'], 'delete from "log_entries"'));
+    $deletes = collect(DB::connection(Databases::LOGS)->getQueryLog())->filter(fn (array $query) => str_starts_with($query['query'], 'delete from "log_entries"'));
 
     expect($deletes)->toHaveCount(4)
-        ->and(DB::table('log_entries')->where('project_id', $project->id)->pluck('message')->all())->toBe(['recent']);
+        ->and(dbTable('log_entries')->where('project_id', $project->id)->pluck('message')->all())->toBe(['recent']);
 });
 
 it('rejects a non-positive --chunk', function () {
@@ -175,9 +176,9 @@ it('removes old traces together with their queries and events', function () {
 
     $this->artisan('watch:prune')->assertSuccessful();
 
-    expect(DB::table('traces')->count())->toBe(0)
-        ->and(DB::table('trace_queries')->count())->toBe(0)
-        ->and(DB::table('event_occurrences')->count())->toBe(0);
+    expect(dbTable('traces')->count())->toBe(0)
+        ->and(dbTable('trace_queries')->count())->toBe(0)
+        ->and(dbTable('event_occurrences')->count())->toBe(0);
 });
 
 it('records when a full run finished and how many rows it deleted', function () {

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\UsesAppDatabase;
 use Database\Factories\ProjectFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -27,7 +28,7 @@ use Illuminate\Support\Str;
 class Project extends Model
 {
     /** @use HasFactory<ProjectFactory> */
-    use HasFactory, HasUuids;
+    use HasFactory, HasUuids, UsesAppDatabase;
 
     /**
      * How many leading characters of a key are kept as its display prefix.

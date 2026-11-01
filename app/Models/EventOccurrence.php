@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Watch\Databases;
 use Database\Factories\EventOccurrenceFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -21,6 +22,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 ])]
 class EventOccurrence extends Model
 {
+    /**
+     * @var string
+     */
+    protected $connection = Databases::TELEMETRY;
+
     /** @use HasFactory<EventOccurrenceFactory> */
     use HasFactory, HasUuids;
 
