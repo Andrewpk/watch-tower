@@ -75,9 +75,14 @@ type Detail = {
 type Props = {
     detail: Detail;
     selectedRange: string;
+    selectedConnection: string | null;
 };
 
-export default function QueryShow({ detail, selectedRange }: Props) {
+export default function QueryShow({
+    detail,
+    selectedRange,
+    selectedConnection,
+}: Props) {
     const { props } = usePage<SharedProps>();
     const slug = props.currentProject?.slug ?? '';
 
@@ -102,7 +107,15 @@ export default function QueryShow({ detail, selectedRange }: Props) {
                 }
                 breadcrumbs={[
                     { label: 'Activity' },
-                    { label: 'Queries', href: queriesRoutes.index(slug).url },
+                    {
+                        label: 'Queries',
+                        href: queriesRoutes.index(slug, {
+                            query: {
+                                range: selectedRange,
+                                connection: selectedConnection,
+                            },
+                        }).url,
+                    },
                     { label: 'Detail' },
                 ]}
                 selectedRange={selectedRange}

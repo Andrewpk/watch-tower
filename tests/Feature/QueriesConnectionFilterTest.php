@@ -93,3 +93,82 @@ it('filters the locations by connection', function () {
             ->where('queries.data.0.location', 'app/Reports.php:20')
             ->where('queries.data.0.locations_count', 1));
 });
+
+it('narrows the query detail to the chosen connection', function () {
+    $hash = sha1('select * from users');
+
+    $this->get(route('projects.queries.show', [$this->project, $hash]))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('projects/queries/show')
+            ->where('selectedConnection', null)
+            ->where('detail.totals.total', 3)
+            ->has('detail.calls', 3)
+            ->where('detail.locations_total', 2));
+
+    $response = $this->get(route('projects.queries.show', [$this->project, $hash, 'connection' => 'mysql']));
+
+    $response
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('selectedConnection', 'mysql')
+            ->where('detail.connection', 'mysql')
+            ->where('detail.totals.total', 2)
+            ->where('detail.totals.total_ms', 40.75)
+            ->has('detail.calls', 2)
+            ->where('detail.locations_total', 1)
+            ->where('detail.locations.0.file', 'app/Users.php'));
+
+    expect(array_sum(array_column($response->inertiaProps('detail')['buckets'], 'count')))->toBe(2);
+});
+
+it('returns not found for a statement that never ran on the chosen connection', function () {
+    $hash = sha1('select * from orders');
+
+    $this->get(route('projects.queries.show', [$this->project, $hash, 'connection' => 'reporting']))->assertOk();
+    $this->get(route('projects.queries.show', [$this->project, $hash, 'connection' => 'mysql']))->assertNotFound();
+});
+
+it('keeps the chosen connection in the list when it has no traffic in range', function () {
+    $this->get(route('projects.queries.index', [$this->project, 'connection' => 'legacy']))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('connections', ['legacy', 'mysql', 'reporting'])
+            ->where('filters.connection', 'legacy')
+            ->where('summary.totals.total', 0)
+            ->where('queries.total', 0));
+
+    $this->get(route('projects.queries.index', [$this->project, 'connection' => 'mysql']))
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('connections', ['mysql', 'reporting']));
+});
+
+it('ignores filters sent as arrays', function (string $filter) {
+    $this->get(route('projects.queries.index', [$this->project, $filter => ['x']]))
+        ->assertOk();
+})->with(['connection', 'search', 'sort', 'dir', 'range']);
+
+it('ignores array filters on the query detail', function (string $filter) {
+    $this->get(route('projects.queries.show', [$this->project, sha1('select * from users'), $filter => ['x']]))
+        ->assertOk();
+})->with(['connection', 'range']);
+
+it('treats a connection named all as a real connection', function () {
+    TraceQuery::factory()->create([
+        'project_id' => $this->project->id,
+        'trace_id' => Trace::factory()->create(['project_id' => $this->project->id])->id,
+        'sql' => 'select * from everything',
+        'connection_name' => 'all',
+        'duration_ms' => 5,
+        'occurred_at' => now(),
+    ]);
+
+    $this->get(route('projects.queries.index', [$this->project, 'connection' => 'all']))
+        ->assertOk()
+        ->assertInertia(fn (AssertableInertia $page) => $page
+            ->where('connections', ['all', 'mysql', 'reporting'])
+            ->where('filters.connection', 'all')
+            ->where('summary.totals.total', 1)
+            ->where('queries.total', 1)
+            ->where('queries.data.0.connection', 'all'));
+});

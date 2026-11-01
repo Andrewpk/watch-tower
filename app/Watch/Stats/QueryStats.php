@@ -46,19 +46,23 @@ class QueryStats
     }
 
     /**
-     * The distinct connections that ran statements in range, for the filter on the Queries page.
+     * The distinct connections that ran statements in range, for the filter on the Queries page. The selected connection
+     * is always included, so the filter still shows it after a range change leaves that connection with no traffic.
      *
      * @return list<string>
      */
-    public function connections(Project $project, TimeRange $range): array
+    public function connections(Project $project, TimeRange $range, ?string $selected = null): array
     {
         return $this->baseQuery($project, $range)
             ->whereNotNull('connection_name')
             ->select('connection_name')
             ->distinct()
-            ->orderBy('connection_name')
             ->pluck('connection_name')
             ->map(fn ($value) => (string) $value)
+            ->when($selected !== null, fn ($connections) => $connections->push($selected))
+            ->unique()
+            ->sort()
+            ->values()
             ->all();
     }
 
@@ -157,11 +161,9 @@ class QueryStats
      *   calls: list<array{id:string,duration_ms:float,row_count:int|null,file:string|null,line:int|null,connection_type:string|null,is_slow:bool,is_n_plus_one:bool,occurred_at:string|null}>
      * }|null
      */
-    public function queryDetail(Project $project, TimeRange $range, string $hash): ?array
+    public function queryDetail(Project $project, TimeRange $range, string $hash, ?string $connection = null): ?array
     {
-        $sql = TraceQuery::query()
-            ->where('project_id', $project->id)
-            ->whereBetween('occurred_at', [$range->from, $range->to])
+        $sql = $this->baseQuery($project, $range, connection: $connection)
             ->select('sql')
             ->get()
             ->pluck('sql')
@@ -172,18 +174,12 @@ class QueryStats
             return null;
         }
 
-        $summary = $this->summary($project, $range, $sql);
+        $summary = $this->summary($project, $range, $sql, $connection);
 
-        $connection = TraceQuery::query()
-            ->where('project_id', $project->id)
-            ->where('sql', $sql)
-            ->whereBetween('occurred_at', [$range->from, $range->to])
+        $connectionName = $this->baseQuery($project, $range, $sql, $connection)
             ->value('connection_name');
 
-        $connectionTypes = TraceQuery::query()
-            ->where('project_id', $project->id)
-            ->where('sql', $sql)
-            ->whereBetween('occurred_at', [$range->from, $range->to])
+        $connectionTypes = $this->baseQuery($project, $range, $sql, $connection)
             ->whereNotNull('connection_type')
             ->distinct()
             ->orderBy('connection_type')
@@ -191,10 +187,7 @@ class QueryStats
             ->map(fn ($value) => (string) $value)
             ->all();
 
-        $locationGroups = TraceQuery::query()
-            ->where('project_id', $project->id)
-            ->where('sql', $sql)
-            ->whereBetween('occurred_at', [$range->from, $range->to])
+        $locationGroups = $this->baseQuery($project, $range, $sql, $connection)
             ->whereNotNull('file')
             ->select('file', 'line')
             ->groupBy('file', 'line');
@@ -220,10 +213,7 @@ class QueryStats
             ])
             ->all();
 
-        $calls = TraceQuery::query()
-            ->where('project_id', $project->id)
-            ->where('sql', $sql)
-            ->whereBetween('occurred_at', [$range->from, $range->to])
+        $calls = $this->baseQuery($project, $range, $sql, $connection)
             ->orderByDesc('occurred_at')
             ->limit(200)
             ->get(['id', 'duration_ms', 'row_count', 'file', 'line', 'connection_type', 'is_slow', 'is_n_plus_one', 'occurred_at'])
@@ -243,7 +233,7 @@ class QueryStats
         return [
             'sql' => $sql,
             'hash' => $hash,
-            'connection' => $connection !== null ? (string) $connection : null,
+            'connection' => $connectionName !== null ? (string) $connectionName : null,
             'connection_types' => $connectionTypes,
             'locations' => $locations,
             'locations_total' => $locationsTotal,
